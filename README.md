@@ -44,11 +44,36 @@ streamlit run app/app.py
 3. Connect your GitHub account
 4. Select this repository
 5. Set main file path to `app/app.py`
-6. Add your OpenAI API key in the secrets section:
+6. Add one of these API keys in the secrets section:
+
+   **Free Options:**
    ```
-   OPENAI_API_KEY = "your-api-key-here"
+   HF_API_KEY = "your-huggingface-api-key"
+   # OR
+   TOGETHER_API_KEY = "your-together-api-key"
    ```
+
+   **Paid Option:**
+   ```
+   OPENAI_API_KEY = "your-openai-api-key"
+   ```
+
 7. Deploy!
+
+### Getting Free API Keys
+
+#### Hugging Face (Recommended Free Option)
+1. Go to [huggingface.co](https://huggingface.co)
+2. Sign up for free account
+3. Go to Settings → Access Tokens
+4. Create new token with "Read" permissions
+5. Use token as `HF_API_KEY`
+
+#### Together AI (Alternative Free Option)
+1. Go to [together.ai](https://together.ai)
+2. Sign up for free account
+3. Get API key from dashboard
+4. Use as `TOGETHER_API_KEY`
 
 ## Requirements
 
@@ -72,9 +97,38 @@ app/
 
 - **Frontend**: Streamlit
 - **Computer Vision**: MediaPipe, OpenCV
-- **AI/ML**: OpenAI GPT-4o-mini, Ollama
+- **AI/ML**: Multiple LLM providers (Ollama, OpenAI, Hugging Face, Together AI)
 - **Data Processing**: pandas, NumPy
 - **Video Processing**: OpenCV
+
+## LLM Options
+
+Choose from multiple AI providers:
+
+### Free Options
+- **Ollama** (local): Completely free, requires local installation
+- **Hugging Face** (cloud): Free tier with generous limits
+- **Together AI** (cloud): Free tier available
+
+### Paid Option
+- **OpenAI** (cloud): Very cheap (~$0.002 per analysis)
+
+## Environment Variables
+
+Set one of these API keys for cloud deployment:
+
+```bash
+# For OpenAI (paid but cheap)
+OPENAI_API_KEY=your-openai-key
+
+# For Hugging Face (free)
+HF_API_KEY=your-huggingface-key
+
+# For Together AI (free)
+TOGETHER_API_KEY=your-together-key
+
+# Or run locally with Ollama (no API key needed)
+```
 
 ## Contributing
 

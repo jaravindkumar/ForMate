@@ -332,19 +332,13 @@ if uploaded:
 
             # LLM report
             try:
-                import openai
                 import os
+                import requests
 
-                # Check if running locally (with Ollama) or in cloud (with OpenAI API)
+                # Determine which LLM provider to use
                 openai_api_key = os.getenv("OPENAI_API_KEY")
-                if openai_api_key:
-                    # Cloud deployment: use OpenAI API
-                    client = openai.OpenAI(api_key=openai_api_key)
-                    model = "gpt-4o-mini"  # Cost-effective model for cloud
-                else:
-                    # Local deployment: use Ollama
-                    client = openai.OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
-                    model = "llama3.2:3b"
+                hf_api_key = os.getenv("HF_API_KEY")  # Hugging Face
+                together_api_key = os.getenv("TOGETHER_API_KEY")
 
                 prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
 
@@ -355,12 +349,70 @@ Session summary:
 
 Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable."""
 
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=500
-                )
-                llm_report = response.choices[0].message.content
+                if openai_api_key:
+                    # OpenAI API (paid but cheap)
+                    import openai
+                    client = openai.OpenAI(api_key=openai_api_key)
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=500
+                    )
+                    llm_report = response.choices[0].message.content
+
+                elif hf_api_key:
+                    # Hugging Face Inference API (free tier)
+                    headers = {"Authorization": f"Bearer {hf_api_key}"}
+                    payload = {
+                        "inputs": prompt,
+                        "parameters": {
+                            "max_new_tokens": 500,
+                            "temperature": 0.7,
+                            "do_sample": True
+                        }
+                    }
+                    response = requests.post(
+                        "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium",
+                        headers=headers,
+                        json=payload
+                    )
+                    if response.status_code == 200:
+                        llm_report = response.json()[0]["generated_text"]
+                    else:
+                        raise Exception(f"Hugging Face API error: {response.status_code}")
+
+                elif together_api_key:
+                    # Together AI (free tier)
+                    headers = {
+                        "Authorization": f"Bearer {together_api_key}",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "model": "meta-llama/Llama-2-7b-chat-hf",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 500,
+                        "temperature": 0.7
+                    }
+                    response = requests.post(
+                        "https://api.together.xyz/v1/chat/completions",
+                        headers=headers,
+                        json=payload
+                    )
+                    if response.status_code == 200:
+                        llm_report = response.json()["choices"][0]["message"]["content"]
+                    else:
+                        raise Exception(f"Together AI API error: {response.status_code}")
+
+                else:
+                    # Local Ollama (completely free)
+                    import openai
+                    client = openai.OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+                    response = client.chat.completions.create(
+                        model="llama3.2:3b",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=500
+                    )
+                    llm_report = response.choices[0].message.content
 
                 # Save
                 (gold_dir / "llm_report.txt").write_text(llm_report, encoding="utf-8")
