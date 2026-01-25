@@ -14,9 +14,9 @@ import cv2
 # Config
 # ------------------------------------------------------------
 
-ROOT = Path(__file__).resolve().parents[1]  # formate_demo/
-# Use conda environment Python instead of sys.executable
-PY = "/opt/anaconda3/envs/formate/bin/python"
+ROOT = Path(__file__).resolve().parents[1]
+PY = sys.executable
+
 
 
 # ------------------------------------------------------------
