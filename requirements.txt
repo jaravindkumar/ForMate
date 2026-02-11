@@ -7,7 +7,7 @@ numpy<2
 pyarrow==23.0.0
 
 # --- Computer vision ---
-mediapipe==0.10.21
+mediapipe==0.10.9
 pillow==12.1.0
 
 # --- Networking / LLM ---
