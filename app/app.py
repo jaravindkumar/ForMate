@@ -18,6 +18,17 @@ ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
 
 
+# ------------------------------------------------------------
+# Session State Initialization
+# ------------------------------------------------------------
+
+if "analysis_results" not in st.session_state:
+    st.session_state.analysis_results = None
+if "tmp_video_path" not in st.session_state:
+    st.session_state.tmp_video_path = None
+if "uploaded_file_id" not in st.session_state:
+    st.session_state.uploaded_file_id = None
+
 
 # ------------------------------------------------------------
 # Helpers
@@ -91,6 +102,107 @@ def coach_summary(summary: dict) -> dict:
     }
 
 
+def generate_llm_report(exercise, gold_summary, issues, gold_dir):
+    """Generate LLM coaching report. Returns the report text."""
+    try:
+        import os
+        import requests
+
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        hf_api_key = os.getenv("HF_API_KEY")
+        together_api_key = os.getenv("TOGETHER_API_KEY")
+
+        issue_text = ', '.join([i['type'] for i in issues]) if issues else 'None detected'
+
+        prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
+
+Session summary:
+- Overall score: {gold_summary['scores']['overall']:.1f}/100
+- Reps: {gold_summary['reps']}
+- Key issues: {issue_text}
+
+Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable."""
+
+        if openai_api_key:
+            import openai
+            client = openai.OpenAI(api_key=openai_api_key)
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500
+            )
+            return response.choices[0].message.content
+
+        elif hf_api_key:
+            headers = {"Authorization": f"Bearer {hf_api_key}"}
+            payload = {
+                "inputs": prompt,
+                "parameters": {
+                    "max_new_tokens": 500,
+                    "temperature": 0.7,
+                    "do_sample": True
+                }
+            }
+            response = requests.post(
+                "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium",
+                headers=headers,
+                json=payload
+            )
+            if response.status_code == 200:
+                return response.json()[0]["generated_text"]
+            else:
+                raise Exception(f"Hugging Face API error: {response.status_code}")
+
+        elif together_api_key:
+            headers = {
+                "Authorization": f"Bearer {together_api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "meta-llama/Llama-2-7b-chat-hf",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 500,
+                "temperature": 0.7
+            }
+            response = requests.post(
+                "https://api.together.xyz/v1/chat/completions",
+                headers=headers,
+                json=payload
+            )
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            else:
+                raise Exception(f"Together AI API error: {response.status_code}")
+
+        else:
+            # Local Ollama (completely free)
+            import openai
+            client = openai.OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+            response = client.chat.completions.create(
+                model="llama3.2:3b",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500
+            )
+            return response.choices[0].message.content
+
+    except Exception:
+        # Fallback report when no LLM is available
+        report = "AI Coaching Report (Generated without LLM)\n\n"
+        report += f"Session Summary: {exercise.capitalize()} with {gold_summary['reps']} reps, overall score {gold_summary['scores']['overall']:.1f}/100.\n\n"
+        if issues:
+            report += "Key Issues Identified:\n"
+            for issue in issues:
+                report += f"- {issue['type'].replace('_', ' ').title()}: {issue['description']}\n"
+        else:
+            report += "No major form issues were detected.\n"
+        report += "\nRecommendations:\n"
+        report += "- Focus on maintaining proper form throughout the movement.\n"
+        report += "- Practice with lighter weights to perfect technique.\n"
+        report += "- Consider filming from different angles for better self-assessment.\n"
+        report += "\nKeep up the good work and stay consistent!"
+        return report
+
+
 # ------------------------------------------------------------
 # UI
 # ------------------------------------------------------------
@@ -135,12 +247,23 @@ with col1:
 
 with col2:
     if uploaded:
+        # Save to temp file only once per upload (avoid re-creating on every rerun)
+        file_id = f"{uploaded.name}_{uploaded.size}"
+        if st.session_state.uploaded_file_id != file_id:
+            st.session_state.uploaded_file_id = file_id
+            st.session_state.analysis_results = None  # reset results for new file
+            tmp_dir = Path(tempfile.mkdtemp())
+            tmp_video = tmp_dir / uploaded.name
+            tmp_video.write_bytes(uploaded.read())
+            st.session_state.tmp_video_path = str(tmp_video)
+
         st.subheader("🎬 Preview")
-        tmp_dir = Path(tempfile.mkdtemp())
-        tmp_video = tmp_dir / uploaded.name
-        tmp_video.write_bytes(uploaded.read())
-        st.video(str(tmp_video))
+        st.video(st.session_state.tmp_video_path)
     else:
+        # File was removed — reset all state
+        st.session_state.uploaded_file_id = None
+        st.session_state.tmp_video_path = None
+        st.session_state.analysis_results = None
         st.info("👆 Upload a video to get started")
 
 # Analysis section
@@ -148,6 +271,8 @@ if uploaded:
 
     if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
         st.markdown("---")
+
+        tmp_video = Path(st.session_state.tmp_video_path)
 
         # Progress tracking
         progress_bar = st.progress(0)
@@ -233,6 +358,35 @@ if uploaded:
         gold_summary = read_json(gold_dir / "summary.json")
         rep_df = pd.read_parquet(gold_dir / "metrics_reps.parquet")
 
+        # -------------------------
+        # Generate snapshots + LLM report (once, during analysis)
+        # -------------------------
+        issues = gold_summary.get("issues", [])
+        snapshot_paths = {}
+
+        if issues:
+            bronze_session_dir = ROOT / "pipeline" / "bronze" / session_id
+            bronze_meta = read_json(bronze_session_dir / "meta.json")
+            video_path = bronze_meta["input_video"]
+
+            snapshots_dir = gold_dir / "snapshots"
+            snapshots_dir.mkdir(exist_ok=True)
+
+            cap = cv2.VideoCapture(video_path)
+            for issue in issues:
+                issue_type = issue["type"]
+                for frame_idx in issue["frames"][:3]:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    ret, frame = cap.read()
+                    if ret:
+                        img_path = snapshots_dir / f"{issue_type}_{frame_idx}.jpg"
+                        cv2.imwrite(str(img_path), frame)
+                        snapshot_paths[f"{issue_type}_{frame_idx}"] = str(img_path)
+            cap.release()
+
+        llm_report = generate_llm_report(exercise, gold_summary, issues, gold_dir)
+        (gold_dir / "llm_report.txt").write_text(llm_report, encoding="utf-8")
+
         progress_bar.progress(100)
         status_text.text("🎉 Analysis complete!")
 
@@ -240,23 +394,49 @@ if uploaded:
         progress_bar.empty()
         status_text.empty()
 
-        st.success("🎯 Analysis Complete!")
+        # Store all results in session state so they persist across reruns
+        st.session_state.analysis_results = {
+            "session_id": session_id,
+            "bronze_summary": bronze_summary,
+            "gold_summary": gold_summary,
+            "gold_dir": str(gold_dir),
+            "num_reps": num_reps,
+            "rep_df": rep_df,
+            "issues": issues,
+            "snapshot_paths": snapshot_paths,
+            "llm_report": llm_report,
+        }
+
         st.balloons()
 
-        # -------------------------
-        # RESULTS DISPLAY
-        # -------------------------
+    # -------------------------
+    # RESULTS DISPLAY (reads from session state — survives reruns)
+    # -------------------------
+    if st.session_state.analysis_results is not None:
+        r = st.session_state.analysis_results
+        session_id = r["session_id"]
+        bronze_summary = r["bronze_summary"]
+        gold_summary = r["gold_summary"]
+        gold_dir = Path(r["gold_dir"])
+        num_reps = r["num_reps"]
+        rep_df = r["rep_df"]
+        issues = r["issues"]
+        snapshot_paths = r["snapshot_paths"]
+        llm_report = r["llm_report"]
+
+        st.success("🎯 Analysis Complete!")
         st.markdown("---")
 
         # Top metrics row
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
             st.metric("🏆 Overall Score", f'{gold_summary["scores"]["overall"]:.1f}/100')
-        with col2:
+        with m2:
             st.metric("🔢 Reps Detected", gold_summary.get("reps", num_reps))
-        with col3:
-            st.metric("⏱️ Session ID", session_id.split('_')[1][:6])
-        with col4:
+        with m3:
+            session_label = session_id.split('_')[1][:6] if '_' in session_id else session_id[:6]
+            st.metric("⏱️ Session ID", session_label)
+        with m4:
             st.metric("🎯 Confidence", f'{gold_summary.get("confidence", 1.0):.0%}')
 
         st.markdown("---")
@@ -304,133 +484,7 @@ if uploaded:
                     st.info(msg)
 
         with right_col:
-            # AI Report section
-            issues = gold_summary.get("issues", [])
-            if issues:
-                st.info("Generating snapshots and AI coaching report...")
-
-                # Get video path from bronze
-                bronze_session_dir = ROOT / "pipeline" / "bronze" / session_id
-                bronze_meta = read_json(bronze_session_dir / "meta.json")
-                video_path = bronze_meta["input_video"]
-
-                # Create snapshots dir
-                snapshots_dir = gold_dir / "snapshots"
-                snapshots_dir.mkdir(exist_ok=True)
-
-                # Extract frames
-                cap = cv2.VideoCapture(video_path)
-                for issue in issues:
-                    issue_type = issue["type"]
-                    for frame_idx in issue["frames"][:3]:  # limit to 3 per issue
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                        ret, frame = cap.read()
-                        if ret:
-                            img_path = snapshots_dir / f"{issue_type}_{frame_idx}.jpg"
-                            cv2.imwrite(str(img_path), frame)
-                cap.release()
-
-            # LLM report
-            try:
-                import os
-                import requests
-
-                # Determine which LLM provider to use
-                openai_api_key = os.getenv("OPENAI_API_KEY")
-                hf_api_key = os.getenv("HF_API_KEY")  # Hugging Face
-                together_api_key = os.getenv("TOGETHER_API_KEY")
-
-                prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
-
-Session summary:
-- Overall score: {gold_summary['scores']['overall']:.1f}/100
-- Reps: {gold_summary['reps']}
-- Key issues: {', '.join([i['type'] for i in issues])}
-
-Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable."""
-
-                if openai_api_key:
-                    # OpenAI API (paid but cheap)
-                    import openai
-                    client = openai.OpenAI(api_key=openai_api_key)
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=500
-                    )
-                    llm_report = response.choices[0].message.content
-
-                elif hf_api_key:
-                    # Hugging Face Inference API (free tier)
-                    headers = {"Authorization": f"Bearer {hf_api_key}"}
-                    payload = {
-                        "inputs": prompt,
-                        "parameters": {
-                            "max_new_tokens": 500,
-                            "temperature": 0.7,
-                            "do_sample": True
-                        }
-                    }
-                    response = requests.post(
-                        "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium",
-                        headers=headers,
-                        json=payload
-                    )
-                    if response.status_code == 200:
-                        llm_report = response.json()[0]["generated_text"]
-                    else:
-                        raise Exception(f"Hugging Face API error: {response.status_code}")
-
-                elif together_api_key:
-                    # Together AI (free tier)
-                    headers = {
-                        "Authorization": f"Bearer {together_api_key}",
-                        "Content-Type": "application/json"
-                    }
-                    payload = {
-                        "model": "meta-llama/Llama-2-7b-chat-hf",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 500,
-                        "temperature": 0.7
-                    }
-                    response = requests.post(
-                        "https://api.together.xyz/v1/chat/completions",
-                        headers=headers,
-                        json=payload
-                    )
-                    if response.status_code == 200:
-                        llm_report = response.json()["choices"][0]["message"]["content"]
-                    else:
-                        raise Exception(f"Together AI API error: {response.status_code}")
-
-                else:
-                    # Local Ollama (completely free)
-                    import openai
-                    client = openai.OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
-                    response = client.chat.completions.create(
-                        model="llama3.2:3b",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=500
-                    )
-                    llm_report = response.choices[0].message.content
-
-                # Save
-                (gold_dir / "llm_report.txt").write_text(llm_report, encoding="utf-8")
-
-            except Exception as e:
-                st.error(f"LLM Error: {e}")
-                llm_report = f"AI Coaching Report (Generated without LLM)\n\n"
-                llm_report += f"Session Summary: {exercise.capitalize()} with {gold_summary['reps']} reps, overall score {gold_summary['scores']['overall']:.1f}/100.\n\n"
-                llm_report += "Key Issues Identified:\n"
-                for issue in issues:
-                    llm_report += f"- {issue['type'].replace('_', ' ').title()}: {issue['description']}\n"
-                llm_report += "\nRecommendations:\n"
-                llm_report += "- Focus on maintaining proper form throughout the movement.\n"
-                llm_report += "- Practice with lighter weights to perfect technique.\n"
-                llm_report += "- Consider filming from different angles for better self-assessment.\n"
-                llm_report += "\nKeep up the good work and stay consistent!"
-
-            # Display LLM report
+            # AI Coaching Report
             st.subheader("🤖 AI Coaching Report")
             st.markdown(llm_report)
 
@@ -442,9 +496,11 @@ Provide personalized advice on how to improve form, focusing on the identified i
                         st.write(issue['description'])
                         cols = st.columns(min(len(issue["frames"]), 3))
                         for i, frame_idx in enumerate(issue["frames"][:3]):
-                            img_path = snapshots_dir / f"{issue['type']}_{frame_idx}.jpg"
-                            if img_path.exists():
-                                cols[i].image(str(img_path), caption=f"Frame {frame_idx}", width=200)
+                            key = f"{issue['type']}_{frame_idx}"
+                            if key in snapshot_paths:
+                                img_path = Path(snapshot_paths[key])
+                                if img_path.exists():
+                                    cols[i].image(str(img_path), caption=f"Frame {frame_idx}", width=200)
 
             # Detailed metrics
             st.subheader("📊 Detailed Metrics")
