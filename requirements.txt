@@ -6,8 +6,7 @@ pandas==2.3.3
 numpy<2
 pyarrow==23.0.0
 
-# --- Computer vision (headless for servers) ---
-opencv-contrib-python-headless==4.10.0.84
+# --- Computer vision ---
 mediapipe==0.10.21
 pillow==12.1.0
 
