@@ -200,6 +200,11 @@ def segment_squat_reps(df: pd.DataFrame) -> pd.DataFrame:
     if peaks:   df.loc[df.index[peaks],   "peak"]   = True
     if troughs: df.loc[df.index[troughs], "trough"] = True
     return df
+
+
+# --------- main pipeline ---------
+
+def run_silver(session_dir: str) -> dict:
     session_dir = Path(session_dir)
     meta_path = session_dir / "meta.json"
     keypoints_path = session_dir / "keypoints.jsonl"
