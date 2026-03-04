@@ -77,14 +77,10 @@ def extract_bronze(
     overlay_path = out_dir / "overlay.mp4"
     writer = None
     if write_overlay:
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(str(overlay_path), fourcc, float(fps), (width, height))
         if not writer.isOpened():
-            # Fallback to mp4v
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(str(overlay_path), fourcc, float(fps), (width, height))
-            if not writer.isOpened():
-                raise RuntimeError("Failed to open VideoWriter for overlay.mp4")
+            raise RuntimeError("Failed to open VideoWriter for overlay.mp4")
 
     t0 = time.time()
     frame_idx = 0
@@ -153,6 +149,20 @@ def extract_bronze(
         writer.release()
 
     elapsed = time.time() - t0
+
+    # Re-encode overlay to H.264 for browser compatibility
+    if write_overlay and overlay_path.exists():
+        import subprocess
+        reencoded = out_dir / "overlay_h264.mp4"
+        result = subprocess.run([
+            "ffmpeg", "-y", "-i", str(overlay_path),
+            "-vcodec", "libx264", "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            str(reencoded)
+        ], capture_output=True)
+        if result.returncode == 0:
+            overlay_path.unlink()
+            reencoded.rename(overlay_path)
     summary = {
         "session_id": session_id,
         "frames_processed": frame_idx,
