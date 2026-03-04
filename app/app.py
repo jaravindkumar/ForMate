@@ -663,7 +663,8 @@ with col_up:
     """, unsafe_allow_html=True)
     uploaded = st.file_uploader("", type=["mp4", "mov", "m4v"], label_visibility="collapsed")
     if uploaded:
+        fname = uploaded.name
+        fsize = f"{uploaded.size/(1024*1024):.1f}"
         st.markdown(f"""
         <div style="margin-top:0.75rem;padding:0.75rem 1rem;background:rgba(200,244,0,0.06);
-                    border-radius:8px;border:1px solid rgba(200,244,0,0.2);
-                    font-size:0.82
+                    border-ra
