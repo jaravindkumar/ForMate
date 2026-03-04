@@ -351,21 +351,12 @@ if uploaded:
                 together_api_key = get_secret("TOGETHER_API_KEY")
                 hf_api_key = get_secret("HF_API_KEY")
 
-                prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
-
-Session summary:
-- Overall score: {gold_summary['scores']['overall']:.1f}/100
-- Reps: {gold_summary['reps']}
-- Key issues: {', '.join([i['type'] for i in issues])}
-
-Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable."""
-
                 llm_report = None
 
                 if google_api_key:
-                    # Google Gemini — free, 1500 req/day
+                    # Google Gemini 2.0 Flash — free
                     response = requests.post(
-                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={google_api_key}",
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={google_api_key}",
                         headers={"Content-Type": "application/json"},
                         json={
                             "contents": [{"parts": [{"text": prompt}]}],
@@ -379,7 +370,6 @@ Provide personalized advice on how to improve form, focusing on the identified i
                         raise Exception(f"Gemini error: {response.status_code} - {response.text}")
 
                 elif groq_api_key:
-                    # Groq — free, fast, Llama 3
                     response = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers={"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"},
