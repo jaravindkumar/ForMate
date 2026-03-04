@@ -578,7 +578,7 @@ def call_llm(prompt: str) -> str:
         if r.status_code == 200:
             return r.json()[0].get("generated_text", "").strip()
         raise Exception(f"HF {r.status_code}: {r.text}")
-    raise Exception("No API key. Add GROQ_API_KEY to Streamlit secrets → console.groq.com")
+    raise Exception("No API key. Add GROQ_API_KEY to Streamlit secrets &#8594; console.groq.com")
 
 def score_color(v):
     if v >= 75: return "good"
@@ -618,7 +618,7 @@ st.markdown('<div class="fm-wrap">', unsafe_allow_html=True)
 st.markdown("""
 <nav class="fm-nav">
   <div class="fm-logo">For<span>Mate</span></div>
-  <div class="fm-tag">MVP · AI Form Coach</div>
+  <div class="fm-tag">MVP &middot; AI Form Coach</div>
 </nav>
 """, unsafe_allow_html=True)
 
@@ -627,7 +627,7 @@ st.markdown("""
 <div class="fm-hero">
   <div class="fm-hero-line"></div>
   <div class="fm-accent-bar"></div>
-  <p class="fm-hero-kicker">⚡ Computer Vision · Pose Analysis · AI Coaching</p>
+  <p class="fm-hero-kicker">⚡ Computer Vision &middot; Pose Analysis &middot; AI Coaching</p>
   <h1 class="fm-hero-headline">Analyse<br><em>Your Form.</em><br>Train Smarter.</h1>
   <p class="fm-hero-sub">Upload your workout video and get instant AI-powered form analysis, rep detection, and personalised coaching feedback.</p>
   <div class="fm-accent-num">01</div>
@@ -651,7 +651,7 @@ with col_cfg:
     <div style="margin-top:0.75rem;padding:0.75rem 1rem;background:#1A1A1A;border-radius:8px;
                 border:1px solid #222;font-size:0.8rem;color:#666;">
       <span style="color:var(--lime);font-weight:600;">{exercise.upper()}</span>
-      &nbsp;·&nbsp; {camera_view.replace('_',' ').title()}
+      &nbsp;&middot;&nbsp; {camera_view.replace('_',' ').title()}
     </div>
     """, unsafe_allow_html=True)
 
@@ -666,5 +666,4 @@ with col_up:
         fname = uploaded.name
         fsize = f"{uploaded.size/(1024*1024):.1f}"
         st.markdown(f"""
-        <div style="margin-top:0.75rem;padding:0.75rem 1rem;background:rgba(200,244,0,0.06);
-                    border-ra
+        <div style="margin-top:0.75rem;padding:0.75rem 1rem;background:rgba(200,244,0,0.
