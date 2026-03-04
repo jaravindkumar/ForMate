@@ -273,7 +273,8 @@ if uploaded:
             overlay_path = Path(overlay_rel) if overlay_rel else None
 
             if overlay_path and overlay_path.exists():
-                st.video(str(overlay_path))
+                with open(str(overlay_path), "rb") as vf:
+                    st.video(vf.read())
                 st.caption("Pose tracking overlay with key joint highlights")
             else:
                 st.warning("⚠️ Overlay video not found")
@@ -335,102 +336,84 @@ if uploaded:
                 import os
                 import requests
 
-                def get_secret(key):
-                    try:
-                        val = st.secrets[key]
-                        if val:
-                            return str(val).strip()
-                    except Exception:
-                        pass
-                    return os.getenv(key, "").strip()
-
-                groq_api_key     = get_secret("GROQ_API_KEY")
-                openai_api_key   = get_secret("OPENAI_API_KEY")
-                together_api_key = get_secret("TOGETHER_API_KEY")
-                hf_api_key       = get_secret("HF_API_KEY")
+                # Determine which LLM provider to use
+                openai_api_key = os.getenv("OPENAI_API_KEY")
+                hf_api_key = os.getenv("HF_API_KEY")  # Hugging Face
+                together_api_key = os.getenv("TOGETHER_API_KEY")
 
                 prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
 
 Session summary:
 - Overall score: {gold_summary['scores']['overall']:.1f}/100
 - Reps: {gold_summary['reps']}
-- Key issues: {', '.join([i['type'] for i in issues]) if issues else 'None detected'}
-- Hinge quality: {gold_summary['scores'].get('hinge_quality', 0):.1f}/100
-- Trunk control: {gold_summary['scores'].get('trunk_control', 0):.1f}/100
-- Symmetry: {gold_summary['scores'].get('symmetry', 0):.1f}/100
+- Key issues: {', '.join([i['type'] for i in issues])}
 
-Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable. Use plain text only, no markdown."""
+Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable."""
 
-                llm_report = None
-
-                if groq_api_key:
-                    # Groq — free, fast, llama-3.3-70b
-                    response = requests.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {groq_api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": "llama-3.3-70b-versatile",
-                            "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": 600,
-                            "temperature": 0.7
-                        },
-                        timeout=30
-                    )
-                    if response.status_code == 200:
-                        llm_report = response.json()["choices"][0]["message"]["content"]
-                    else:
-                        raise Exception(f"Groq error: {response.status_code} - {response.text}")
-
-                elif openai_api_key:
+                if openai_api_key:
+                    # OpenAI API (paid but cheap)
                     import openai
                     client = openai.OpenAI(api_key=openai_api_key)
-                    resp = client.chat.completions.create(
+                    response = client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=600
+                        max_tokens=500
                     )
-                    llm_report = resp.choices[0].message.content
+                    llm_report = response.choices[0].message.content
+
+                elif hf_api_key:
+                    # Hugging Face Inference API (free tier)
+                    headers = {"Authorization": f"Bearer {hf_api_key}"}
+                    payload = {
+                        "inputs": prompt,
+                        "parameters": {
+                            "max_new_tokens": 500,
+                            "temperature": 0.7,
+                            "do_sample": True
+                        }
+                    }
+                    response = requests.post(
+                        "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium",
+                        headers=headers,
+                        json=payload
+                    )
+                    if response.status_code == 200:
+                        llm_report = response.json()[0]["generated_text"]
+                    else:
+                        raise Exception(f"Hugging Face API error: {response.status_code}")
 
                 elif together_api_key:
+                    # Together AI (free tier)
+                    headers = {
+                        "Authorization": f"Bearer {together_api_key}",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "model": "meta-llama/Llama-2-7b-chat-hf",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 500,
+                        "temperature": 0.7
+                    }
                     response = requests.post(
                         "https://api.together.xyz/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {together_api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": "meta-llama/Llama-3-8b-chat-hf",
-                            "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": 600,
-                            "temperature": 0.7
-                        },
-                        timeout=30
+                        headers=headers,
+                        json=payload
                     )
                     if response.status_code == 200:
                         llm_report = response.json()["choices"][0]["message"]["content"]
                     else:
-                        raise Exception(f"Together AI error: {response.status_code} - {response.text}")
-
-                elif hf_api_key:
-                    response = requests.post(
-                        "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
-                        headers={"Authorization": f"Bearer {hf_api_key}"},
-                        json={
-                            "inputs": f"<s>[INST] {prompt} [/INST]",
-                            "parameters": {"max_new_tokens": 500, "return_full_text": False}
-                        },
-                        timeout=60
-                    )
-                    if response.status_code == 200:
-                        llm_report = response.json()[0].get("generated_text", "").strip()
-                    else:
-                        raise Exception(f"HuggingFace error: {response.status_code} - {response.text}")
+                        raise Exception(f"Together AI API error: {response.status_code}")
 
                 else:
-                    raise Exception("No API key found. Add GROQ_API_KEY to Streamlit secrets. Get a free key at console.groq.com")
+                    # Local Ollama (completely free)
+                    import openai
+                    client = openai.OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+                    response = client.chat.completions.create(
+                        model="llama3.2:3b",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=500
+                    )
+                    llm_report = response.choices[0].message.content
 
                 # Save
                 (gold_dir / "llm_report.txt").write_text(llm_report, encoding="utf-8")
@@ -506,3 +489,4 @@ else:
     """)
 
     st.info("👆 Upload a video above to get started!")
+                
