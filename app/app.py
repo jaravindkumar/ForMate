@@ -344,10 +344,10 @@ if uploaded:
                         pass
                     return os.getenv(key, "").strip()
 
-                groq_api_key    = get_secret("GROQ_API_KEY")
-                openai_api_key  = get_secret("OPENAI_API_KEY")
+                groq_api_key     = get_secret("GROQ_API_KEY")
+                openai_api_key   = get_secret("OPENAI_API_KEY")
                 together_api_key = get_secret("TOGETHER_API_KEY")
-                hf_api_key      = get_secret("HF_API_KEY")
+                hf_api_key       = get_secret("HF_API_KEY")
 
                 prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
 
@@ -364,7 +364,7 @@ Provide personalized advice on how to improve form, focusing on the identified i
                 llm_report = None
 
                 if groq_api_key:
-                    # Groq — free, 14400 req/day, no billing needed
+                    # Groq — free, fast, llama-3.3-70b
                     response = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers={
@@ -372,7 +372,7 @@ Provide personalized advice on how to improve form, focusing on the identified i
                             "Content-Type": "application/json"
                         },
                         json={
-                            "model": "llama3-8b-8192",
+                            "model": "llama-3.3-70b-versatile",
                             "messages": [{"role": "user", "content": prompt}],
                             "max_tokens": 600,
                             "temperature": 0.7
