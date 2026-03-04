@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import math
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +12,6 @@ import mediapipe as mp
 
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
 
 
 def utc_now_iso() -> str:
@@ -21,6 +21,151 @@ def utc_now_iso() -> str:
 def make_session_id(exercise: str) -> str:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"{stamp}_{exercise}"
+
+
+# ── THRESHOLD CHECKS ─────────────────────────────────────────────
+def _angle(ax, ay, bx, by, cx, cy):
+    """Angle at B in triangle ABC (degrees)."""
+    v1x, v1y = ax - bx, ay - by
+    v2x, v2y = cx - bx, cy - by
+    dot  = v1x*v2x + v1y*v2y
+    mag  = math.sqrt((v1x**2+v1y**2)*(v2x**2+v2y**2)) + 1e-9
+    return math.degrees(math.acos(max(-1.0, min(1.0, dot/mag))))
+
+
+def check_thresholds(lms, exercise, w, h):
+    """
+    lms: list of mediapipe landmark objects (normalised 0-1).
+    Returns dict: key -> ("ok"|"warn"|"bad", label)
+    Uses pixel coords internally for consistent threshold values.
+    """
+    def px(i): return lms[i].x * w
+    def py(i): return lms[i].y * h
+    def vis(i): return lms[i].visibility
+
+    flags = {}
+    L = mp_pose.PoseLandmark
+
+    if exercise == "deadlift":
+        # 1. Back angle: shoulder-hip-knee
+        if all(vis(i) > 0.4 for i in [L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE]):
+            ang = _angle(px(L.LEFT_SHOULDER), py(L.LEFT_SHOULDER),
+                         px(L.LEFT_HIP),      py(L.LEFT_HIP),
+                         px(L.LEFT_KNEE),     py(L.LEFT_KNEE))
+            if ang >= 145:      flags["back"]  = ("ok",   "Back OK")
+            elif ang >= 115:    flags["back"]  = ("warn", "Back rounding")
+            else:               flags["back"]  = ("bad",  "Severe back round!")
+
+        # 2. Bar drift: shoulder should stay over hip
+        if all(vis(i) > 0.4 for i in [L.LEFT_SHOULDER, L.LEFT_HIP]):
+            drift = abs(px(L.LEFT_SHOULDER) - px(L.LEFT_HIP))
+            if drift < w*0.08:      flags["drift"] = ("ok",   "Bar path OK")
+            elif drift < w*0.15:    flags["drift"] = ("warn", "Bar drifting")
+            else:                   flags["drift"] = ("bad",  "Bar too far!")
+
+        # 3. Hip hinge depth
+        if all(vis(i) > 0.4 for i in [L.LEFT_HIP, L.LEFT_KNEE]):
+            diff = py(L.LEFT_KNEE) - py(L.LEFT_HIP)
+            flags["hinge"] = ("ok", "Good hinge") if diff > h*0.04 else ("warn", "Hinge deeper")
+
+    else:  # squat
+        # 1. Knee cave: knee X vs hip X
+        if all(vis(i) > 0.4 for i in [L.LEFT_HIP, L.LEFT_KNEE]):
+            cave = px(L.LEFT_KNEE) - px(L.LEFT_HIP)
+            if cave >= -w*0.02:     flags["knee"] = ("ok",   "Knees OK")
+            elif cave >= -w*0.06:   flags["knee"] = ("warn", "Knee caving")
+            else:                   flags["knee"] = ("bad",  "Knee cave!")
+
+        # 2. Squat depth: hip Y vs knee Y
+        if all(vis(i) > 0.4 for i in [L.LEFT_HIP, L.LEFT_KNEE]):
+            depth = py(L.LEFT_HIP) - py(L.LEFT_KNEE)
+            if depth >= h*0.02:     flags["depth"] = ("ok",   "Good depth")
+            elif depth >= -h*0.05:  flags["depth"] = ("warn", "Go deeper")
+            else:                   flags["depth"] = ("bad",  "Too shallow")
+
+        # 3. Forward lean: shoulder over hip
+        if all(vis(i) > 0.4 for i in [L.LEFT_SHOULDER, L.LEFT_HIP]):
+            lean = abs(px(L.LEFT_SHOULDER) - px(L.LEFT_HIP))
+            if lean < w*0.08:       flags["lean"] = ("ok",   "Upright OK")
+            elif lean < w*0.15:     flags["lean"] = ("warn", "Leaning forward")
+            else:                   flags["lean"] = ("bad",  "Too much lean!")
+
+    return flags
+
+
+# ── JOINT → COLOUR MAPPING ────────────────────────────────────────
+KEY_JOINTS = {
+    "back":  [11, 12, 23, 24],   # shoulders + hips
+    "drift": [11, 12],            # shoulders
+    "hinge": [23, 24],            # hips
+    "knee":  [25, 26],            # knees
+    "depth": [23, 24, 25, 26],   # hips + knees
+    "lean":  [11, 12, 23, 24],   # shoulders + hips
+}
+
+COLOR_OK   = (0, 230, 80)     # green  BGR
+COLOR_WARN = (0, 160, 245)    # orange BGR
+COLOR_BAD  = (50,  50, 255)   # red    BGR
+COLOR_CONN = (200, 200, 200)  # connection lines
+
+CONNECTIONS = [
+    (11,12),(11,13),(12,14),(13,15),(14,16),   # upper body
+    (11,23),(12,24),(23,24),                    # torso
+    (23,25),(24,26),(25,27),(26,28),            # legs
+]
+
+
+def joint_color(idx, flags):
+    worst = "ok"
+    for key, joints in KEY_JOINTS.items():
+        if key not in flags: continue
+        if idx in joints:
+            st = flags[key][0]
+            if st == "bad":
+                return COLOR_BAD
+            if st == "warn" and worst == "ok":
+                worst = "warn"
+    return COLOR_WARN if worst == "warn" else COLOR_OK
+
+
+def draw_threshold_skeleton(frame, lms, flags, w, h):
+    """Draw colour-coded skeleton + flag labels onto frame (BGR in-place)."""
+
+    # Connection colour = worst global status
+    statuses = [f[0] for f in flags.values()]
+    if "bad"  in statuses: conn_col = COLOR_BAD
+    elif "warn" in statuses: conn_col = COLOR_WARN
+    else:                   conn_col = COLOR_OK
+
+    # Draw connections
+    for a, b in CONNECTIONS:
+        lm_a, lm_b = lms[a], lms[b]
+        if lm_a.visibility < 0.35 or lm_b.visibility < 0.35: continue
+        ax, ay = int(lm_a.x * w), int(lm_a.y * h)
+        bx, by = int(lm_b.x * w), int(lm_b.y * h)
+        cv2.line(frame, (ax, ay), (bx, by), conn_col, 2, cv2.LINE_AA)
+
+    # Draw joints
+    for i, lm in enumerate(lms):
+        if lm.visibility < 0.35: continue
+        px_x, px_y = int(lm.x * w), int(lm.y * h)
+        col = joint_color(i, flags)
+        cv2.circle(frame, (px_x, px_y), 6, col,       -1, cv2.LINE_AA)
+        cv2.circle(frame, (px_x, px_y), 6, (20,20,20), 1, cv2.LINE_AA)
+
+    # Draw flag labels — only warn/bad
+    y_off = 32
+    for key, (st, label) in flags.items():
+        if st == "ok": continue
+        col = COLOR_BAD if st == "bad" else COLOR_WARN
+        # Dark shadow for readability
+        cv2.putText(frame, label, (14, y_off),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 4, cv2.LINE_AA)
+        cv2.putText(frame, label, (14, y_off),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, col,     1, cv2.LINE_AA)
+        y_off += 26
+
+    return frame
 
 
 def extract_bronze(
@@ -77,16 +222,18 @@ def extract_bronze(
     overlay_path = out_dir / "overlay.mp4"
     writer = None
     if write_overlay:
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"avc1")
         writer = cv2.VideoWriter(str(overlay_path), fourcc, float(fps), (width, height))
         if not writer.isOpened():
-            raise RuntimeError("Failed to open VideoWriter for overlay.mp4")
+            # Fallback to mp4v
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            writer = cv2.VideoWriter(str(overlay_path), fourcc, float(fps), (width, height))
+            if not writer.isOpened():
+                raise RuntimeError("Failed to open VideoWriter for overlay.mp4")
 
     t0 = time.time()
     frame_idx = 0
     detected_frames = 0
-
-    key_ids = [11, 12, 23, 24, 25, 26, 27, 28, 15, 16]
 
     with mp_pose.Pose(
         static_image_mode=False,
@@ -126,20 +273,9 @@ def extract_bronze(
             if writer is not None:
                 vis = frame.copy()
                 if res.pose_landmarks is not None:
-                    mp_drawing.draw_landmarks(
-                        vis,
-                        res.pose_landmarks,
-                        mp_pose.POSE_CONNECTIONS,
-                        landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style(),
-                    )
-                    h, w = vis.shape[:2]
-                    for idx in key_ids:
-                        lm = res.pose_landmarks.landmark[idx]
-                        x = int(lm.x * w)
-                        y = int(lm.y * h)
-                        cv2.circle(vis, (x, y), 8, (0, 255, 255), -1)
-                        # Removed joint number text overlay
-
+                    lms    = res.pose_landmarks.landmark
+                    flags  = check_thresholds(lms, exercise, width, height)
+                    draw_threshold_skeleton(vis, lms, flags, width, height)
                 writer.write(vis)
 
             frame_idx += 1
@@ -149,20 +285,6 @@ def extract_bronze(
         writer.release()
 
     elapsed = time.time() - t0
-
-    # Re-encode overlay to H.264 for browser compatibility
-    if write_overlay and overlay_path.exists():
-        import subprocess
-        reencoded = out_dir / "overlay_h264.mp4"
-        result = subprocess.run([
-            "ffmpeg", "-y", "-i", str(overlay_path),
-            "-vcodec", "libx264", "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            str(reencoded)
-        ], capture_output=True)
-        if result.returncode == 0:
-            overlay_path.unlink()
-            reencoded.rename(overlay_path)
     summary = {
         "session_id": session_id,
         "frames_processed": frame_idx,
