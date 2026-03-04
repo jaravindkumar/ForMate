@@ -8,6 +8,7 @@ pyarrow==23.0.0
 
 # --- Computer vision (headless for servers) ---
 opencv-python-headless==4.10.0.84
+mediapipe==0.10.21
 pillow==12.1.0
 
 # --- Networking / LLM ---
