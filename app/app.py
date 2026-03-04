@@ -335,69 +335,63 @@ if uploaded:
                 import os
                 import requests
 
-                # API keys — read from Streamlit secrets or environment
-                google_api_key = st.secrets.get("GOOGLE_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
-                groq_api_key = st.secrets.get("GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
-                openai_api_key = st.secrets.get("OPENAI_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
-                together_api_key = st.secrets.get("TOGETHER_API_KEY", "") or os.getenv("TOGETHER_API_KEY", "")
-                hf_api_key = st.secrets.get("HF_API_KEY", "") or os.getenv("HF_API_KEY", "")
+                # Determine which LLM provider to use
+                def get_secret(key):
+                    try:
+                        val = st.secrets[key]
+                        if val:
+                            return str(val).strip()
+                    except Exception:
+                        pass
+                    return os.getenv(key, "").strip()
+
+                google_api_key = get_secret("GOOGLE_API_KEY")
+                groq_api_key = get_secret("GROQ_API_KEY")
+                openai_api_key = get_secret("OPENAI_API_KEY")
+                together_api_key = get_secret("TOGETHER_API_KEY")
+                hf_api_key = get_secret("HF_API_KEY")
 
                 prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
 
 Session summary:
 - Overall score: {gold_summary['scores']['overall']:.1f}/100
 - Reps: {gold_summary['reps']}
-- Key issues: {', '.join([i['type'] for i in issues]) if issues else 'None detected'}
-- Hinge quality: {gold_summary['scores'].get('hinge_quality', 0):.1f}/100
-- Trunk control: {gold_summary['scores'].get('trunk_control', 0):.1f}/100
-- Symmetry: {gold_summary['scores'].get('symmetry', 0):.1f}/100
+- Key issues: {', '.join([i['type'] for i in issues])}
 
-Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable. Use plain text only, no markdown."""
+Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable."""
 
                 llm_report = None
 
                 if google_api_key:
-                    # Google Gemini — free tier, 1500 req/day
+                    # Google Gemini — free, 1500 req/day
                     response = requests.post(
                         f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={google_api_key}",
                         headers={"Content-Type": "application/json"},
                         json={
                             "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {
-                                "maxOutputTokens": 600,
-                                "temperature": 0.7
-                            }
+                            "generationConfig": {"maxOutputTokens": 600, "temperature": 0.7}
                         },
                         timeout=30
                     )
                     if response.status_code == 200:
                         llm_report = response.json()["candidates"][0]["content"]["parts"][0]["text"]
                     else:
-                        raise Exception(f"Gemini API error: {response.status_code} - {response.text}")
+                        raise Exception(f"Gemini error: {response.status_code} - {response.text}")
 
                 elif groq_api_key:
-                    # Groq — free, very fast, Llama 3
+                    # Groq — free, fast, Llama 3
                     response = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {groq_api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": "llama3-8b-8192",
-                            "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": 600,
-                            "temperature": 0.7
-                        },
+                        headers={"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"},
+                        json={"model": "llama3-8b-8192", "messages": [{"role": "user", "content": prompt}], "max_tokens": 600},
                         timeout=30
                     )
                     if response.status_code == 200:
                         llm_report = response.json()["choices"][0]["message"]["content"]
                     else:
-                        raise Exception(f"Groq API error: {response.status_code} - {response.text}")
+                        raise Exception(f"Groq error: {response.status_code} - {response.text}")
 
                 elif openai_api_key:
-                    # OpenAI fallback
                     import openai
                     client = openai.OpenAI(api_key=openai_api_key)
                     resp = client.chat.completions.create(
@@ -408,19 +402,10 @@ Provide personalized advice on how to improve form, focusing on the identified i
                     llm_report = resp.choices[0].message.content
 
                 elif together_api_key:
-                    # Together AI fallback
                     response = requests.post(
                         "https://api.together.xyz/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {together_api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": "meta-llama/Llama-3-8b-chat-hf",
-                            "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": 600,
-                            "temperature": 0.7
-                        },
+                        headers={"Authorization": f"Bearer {together_api_key}", "Content-Type": "application/json"},
+                        json={"model": "meta-llama/Llama-3-8b-chat-hf", "messages": [{"role": "user", "content": prompt}], "max_tokens": 600},
                         timeout=30
                     )
                     if response.status_code == 200:
@@ -429,27 +414,21 @@ Provide personalized advice on how to improve form, focusing on the identified i
                         raise Exception(f"Together AI error: {response.status_code} - {response.text}")
 
                 elif hf_api_key:
-                    # Hugging Face fallback
                     response = requests.post(
                         "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
                         headers={"Authorization": f"Bearer {hf_api_key}"},
-                        json={
-                            "inputs": f"<s>[INST] {prompt} [/INST]",
-                            "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
-                        },
+                        json={"inputs": f"<s>[INST] {prompt} [/INST]", "parameters": {"max_new_tokens": 500, "return_full_text": False}},
                         timeout=60
                     )
                     if response.status_code == 200:
                         llm_report = response.json()[0].get("generated_text", "").strip()
-                        if not llm_report:
-                            raise Exception("Empty response from Hugging Face")
                     else:
-                        raise Exception(f"Hugging Face error: {response.status_code} - {response.text}")
+                        raise Exception(f"HuggingFace error: {response.status_code} - {response.text}")
 
                 else:
                     raise Exception("No API key found. Add GOOGLE_API_KEY to Streamlit secrets. Get a free key at aistudio.google.com")
 
-                # Save report
+                # Save
                 (gold_dir / "llm_report.txt").write_text(llm_report, encoding="utf-8")
 
             except Exception as e:
