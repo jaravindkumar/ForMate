@@ -203,14 +203,14 @@ def coach_feedback(summary):
     s = summary.get("scores", {})
     flags = summary.get("flags", [])
     pos, imp, nxt = [], [], []
-    if s.get("hinge_quality",    0) >= 80: pos.append("Strong hip hinge. Firing the right muscles.")
-    if s.get("symmetry",         0) >= 80: pos.append("Excellent left-right balance throughout.")
-    if s.get("trunk_control",    0) >= 80: pos.append("Solid torso control and bracing.")
-    if s.get("setup_consistency",0) >= 80: pos.append("Consistent setup across all reps.")
-    if s.get("tempo_consistency",100) < 75: imp.append("Pull speed varies between reps. Aim for a steady cadence.")
-    if s.get("setup_consistency",100) < 70: imp.append("Foot position shifts rep to rep. Reset identically every time.")
+    if safe_score(s.get("hinge_quality",    0)) >= 80: pos.append("Strong hip hinge. Firing the right muscles.")
+    if safe_score(s.get("symmetry",         0)) >= 80: pos.append("Excellent left-right balance throughout.")
+    if safe_score(s.get("trunk_control",    0)) >= 80: pos.append("Solid torso control and bracing.")
+    if safe_score(s.get("setup_consistency",0)) >= 80: pos.append("Consistent setup across all reps.")
+    if safe_score(s.get("tempo_consistency",100)) < 75: imp.append("Pull speed varies between reps. Aim for a steady cadence.")
+    if safe_score(s.get("setup_consistency",100)) < 70: imp.append("Foot position shifts rep to rep. Reset identically every time.")
     for f in flags[:2]: imp.append(f.get("message", "Form issue detected."))
-    if s.get("tempo_consistency",100) < 75: nxt.append("Pause 1 sec at the bottom, then drive with consistent speed.")
+    if safe_score(s.get("tempo_consistency",100)) < 75: nxt.append("Pause 1 sec at the bottom, then drive with consistent speed.")
     nxt.append("Keep bar close and brace your core before every pull.")
     if not pos: pos = ["Good effort. Form was trackable throughout."]
     if not imp: imp = ["No major form issues detected. Keep pushing."]
@@ -403,7 +403,7 @@ if uploaded and run_clicked:
             ("Setup Consistency", "setup_consistency"),
         ]
         for label, key in score_items:
-            v  = scores.get(key, 0)
+            v  = safe_score(scores.get(key, 0))
             bc = bar_cls(v)
             vi = int(v)
             st.markdown(
