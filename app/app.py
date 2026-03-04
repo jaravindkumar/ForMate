@@ -335,7 +335,6 @@ if uploaded:
                 import os
                 import requests
 
-                # Determine which LLM provider to use
                 def get_secret(key):
                     try:
                         val = st.secrets[key]
@@ -351,10 +350,22 @@ if uploaded:
                 together_api_key = get_secret("TOGETHER_API_KEY")
                 hf_api_key = get_secret("HF_API_KEY")
 
+                prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
+
+Session summary:
+- Overall score: {gold_summary['scores']['overall']:.1f}/100
+- Reps: {gold_summary['reps']}
+- Key issues: {', '.join([i['type'] for i in issues]) if issues else 'None detected'}
+- Hinge quality: {gold_summary['scores'].get('hinge_quality', 0):.1f}/100
+- Trunk control: {gold_summary['scores'].get('trunk_control', 0):.1f}/100
+- Symmetry: {gold_summary['scores'].get('symmetry', 0):.1f}/100
+
+Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable. Use plain text only, no markdown."""
+
                 llm_report = None
 
                 if google_api_key:
-                    # Google Gemini 2.0 Flash — free
+                    # Google Gemini 2.0 Flash — free, 1500 req/day
                     response = requests.post(
                         f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={google_api_key}",
                         headers={"Content-Type": "application/json"},
@@ -370,6 +381,7 @@ if uploaded:
                         raise Exception(f"Gemini error: {response.status_code} - {response.text}")
 
                 elif groq_api_key:
+                    # Groq — free, fast, Llama 3
                     response = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers={"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"},
