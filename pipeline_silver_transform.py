@@ -124,7 +124,82 @@ def segment_deadlift_reps(df: pd.DataFrame) -> pd.DataFrame:
 
 # --------- main pipeline ---------
 
-def run_silver(session_dir: str) -> dict:
+def segment_squat_reps(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Squat rep = standing -> bottom -> standing
+    Segment using hip Y position: rises (larger y = lower on screen) at bottom of squat.
+    Signal: smoothed mid-hip Y — peaks = bottom of squat, troughs = standing position.
+    """
+    df = df.copy()
+
+    mid_hip_y = (df["l_hip_y_n"] + df["r_hip_y_n"]) / 2.0
+    sig = mid_hip_y.rolling(11, center=True, min_periods=1).mean()
+
+    values = sig.to_numpy()
+    dt = np.median(np.diff(df["t_sec"])) if len(df) > 5 else (1.0 / 30.0)
+    fps = 1.0 / dt if dt > 0 else 30.0
+
+    min_sep = int(0.8 * fps)
+
+    peak_thr   = np.nanpercentile(values, 70)   # hip low (squat bottom)
+    trough_thr = np.nanpercentile(values, 30)   # hip high (standing)
+
+    # peaks = squat bottom (hip y is high = lower on screen)
+    peaks = []
+    last = -10**9
+    for i in range(2, len(values) - 2):
+        if i - last < min_sep: continue
+        v = values[i]
+        if np.isnan(v): continue
+        if v > values[i-1] and v > values[i+1] and v > peak_thr:
+            peaks.append(i)
+            last = i
+
+    # troughs = standing (hip y is low = higher on screen)
+    troughs = []
+    last = -10**9
+    for i in range(2, len(values) - 2):
+        if i - last < min_sep: continue
+        v = values[i]
+        if np.isnan(v): continue
+        if v < values[i-1] and v < values[i+1] and v < trough_thr:
+            troughs.append(i)
+            last = i
+
+    rep_id = np.full(len(df), -1, dtype=int)
+    phase  = np.array(["unknown"] * len(df), dtype=object)
+
+    if len(troughs) < 2:
+        df["rep_id"] = rep_id
+        df["phase"]  = phase
+        df["seg_signal"] = sig
+        df["peak"]   = False
+        df["trough"] = False
+        return df
+
+    rep_counter = 0
+    for k in range(len(troughs) - 1):
+        a, b = troughs[k], troughs[k+1]
+        inner_peaks = [p for p in peaks if a < p < b]
+        if not inner_peaks:
+            continue
+        p = max(inner_peaks, key=lambda idx: values[idx])
+        rep_id[a:b+1] = rep_counter
+        for idx in range(a, b+1):
+            if idx <= p:
+                phase[idx] = "descent"   # going down
+            else:
+                phase[idx] = "ascent"    # coming up
+        rep_counter += 1
+
+    df["rep_id"]     = rep_id
+    df["phase"]      = phase
+    df["seg_signal"] = sig
+    df["peak"]       = False
+    df["trough"]     = False
+    if peaks:   df.loc[df.index[peaks],   "peak"]   = True
+    if troughs: df.loc[df.index[troughs], "trough"] = True
+    return df
     session_dir = Path(session_dir)
     meta_path = session_dir / "meta.json"
     keypoints_path = session_dir / "keypoints.jsonl"
@@ -195,12 +270,7 @@ def run_silver(session_dir: str) -> dict:
     if exercise == "deadlift":
         df = segment_deadlift_reps(df)
     else:
-        # placeholder for squat segmentation later
-        df["rep_id"] = -1
-        df["phase"] = "unknown"
-        df["seg_signal"] = 0.0
-        df["peak"] = False
-        df["trough"] = False
+        df = segment_squat_reps(df)
 
     # reps table
     reps = (
