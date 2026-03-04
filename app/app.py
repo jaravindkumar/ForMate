@@ -336,83 +336,109 @@ if uploaded:
                 import requests
 
                 # Determine which LLM provider to use
-                openai_api_key = os.getenv("OPENAI_API_KEY")
-                hf_api_key = os.getenv("HF_API_KEY")  # Hugging Face
-                together_api_key = os.getenv("TOGETHER_API_KEY")
+                openai_api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", "")
+                hf_api_key = os.getenv("HF_API_KEY") or st.secrets.get("HF_API_KEY", "")
+                together_api_key = os.getenv("TOGETHER_API_KEY") or st.secrets.get("TOGETHER_API_KEY", "")
+                anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY", "")
 
                 prompt = f"""Generate a concise one-page coaching report for a {exercise} session.
 
 Session summary:
 - Overall score: {gold_summary['scores']['overall']:.1f}/100
 - Reps: {gold_summary['reps']}
-- Key issues: {', '.join([i['type'] for i in issues])}
+- Key issues: {', '.join([i['type'] for i in issues]) if issues else 'None'}
+- Hinge quality: {gold_summary['scores'].get('hinge_quality', 0):.1f}/100
+- Trunk control: {gold_summary['scores'].get('trunk_control', 0):.1f}/100
+- Symmetry: {gold_summary['scores'].get('symmetry', 0):.1f}/100
 
-Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable."""
+Provide personalized advice on how to improve form, focusing on the identified issues. Keep it encouraging and actionable. Use plain text with no markdown."""
 
-                if openai_api_key:
-                    # OpenAI API (paid but cheap)
+                llm_report = None
+
+                if anthropic_api_key:
+                    # Anthropic Claude (reliable, cheap)
+                    headers = {
+                        "x-api-key": anthropic_api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    }
+                    payload = {
+                        "model": "claude-haiku-4-5-20251001",
+                        "max_tokens": 600,
+                        "messages": [{"role": "user", "content": prompt}]
+                    }
+                    response = requests.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers=headers,
+                        json=payload,
+                        timeout=30
+                    )
+                    if response.status_code == 200:
+                        llm_report = response.json()["content"][0]["text"]
+                    else:
+                        raise Exception(f"Anthropic API error: {response.status_code} - {response.text}")
+
+                elif openai_api_key:
+                    # OpenAI API
                     import openai
                     client = openai.OpenAI(api_key=openai_api_key)
                     response = client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=500
+                        max_tokens=600
                     )
                     llm_report = response.choices[0].message.content
 
-                elif hf_api_key:
-                    # Hugging Face Inference API (free tier)
-                    headers = {"Authorization": f"Bearer {hf_api_key}"}
-                    payload = {
-                        "inputs": prompt,
-                        "parameters": {
-                            "max_new_tokens": 500,
-                            "temperature": 0.7,
-                            "do_sample": True
-                        }
-                    }
-                    response = requests.post(
-                        "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium",
-                        headers=headers,
-                        json=payload
-                    )
-                    if response.status_code == 200:
-                        llm_report = response.json()[0]["generated_text"]
-                    else:
-                        raise Exception(f"Hugging Face API error: {response.status_code}")
-
                 elif together_api_key:
-                    # Together AI (free tier)
+                    # Together AI — updated model name (Llama-2 deprecated)
                     headers = {
                         "Authorization": f"Bearer {together_api_key}",
                         "Content-Type": "application/json"
                     }
                     payload = {
-                        "model": "meta-llama/Llama-2-7b-chat-hf",
+                        "model": "meta-llama/Llama-3-8b-chat-hf",
                         "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 500,
+                        "max_tokens": 600,
                         "temperature": 0.7
                     }
                     response = requests.post(
                         "https://api.together.xyz/v1/chat/completions",
                         headers=headers,
-                        json=payload
+                        json=payload,
+                        timeout=30
                     )
                     if response.status_code == 200:
                         llm_report = response.json()["choices"][0]["message"]["content"]
                     else:
-                        raise Exception(f"Together AI API error: {response.status_code}")
+                        raise Exception(f"Together AI API error: {response.status_code} - {response.text}")
+
+                elif hf_api_key:
+                    # Hugging Face — use a proper instruction model
+                    headers = {"Authorization": f"Bearer {hf_api_key}"}
+                    payload = {
+                        "inputs": f"<s>[INST] {prompt} [/INST]",
+                        "parameters": {
+                            "max_new_tokens": 500,
+                            "temperature": 0.7,
+                            "return_full_text": False
+                        }
+                    }
+                    response = requests.post(
+                        "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
+                        headers=headers,
+                        json=payload,
+                        timeout=60
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        llm_report = result[0].get("generated_text", "").strip()
+                        if not llm_report:
+                            raise Exception("Empty response from Hugging Face")
+                    else:
+                        raise Exception(f"Hugging Face API error: {response.status_code} - {response.text}")
 
                 else:
-                    # Local Ollama (completely free)
-                    import openai
-                    client = openai.OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
-                    response = client.chat.completions.create(
-                        model="llama3.2:3b",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=500
-                    )
-                    llm_report = response.choices[0].message.content
+                    raise Exception("No API key found. Please add ANTHROPIC_API_KEY, OPENAI_API_KEY, TOGETHER_API_KEY, or HF_API_KEY to your Streamlit secrets.")
 
                 # Save
                 (gold_dir / "llm_report.txt").write_text(llm_report, encoding="utf-8")
