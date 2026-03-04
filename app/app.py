@@ -484,5 +484,4 @@ elif run_clicked:
 
     # ── CARD GRID ──
     st.markdown('<div class="cgrid">', unsafe_allow_html=True)
-
    
