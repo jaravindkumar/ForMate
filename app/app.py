@@ -214,9 +214,149 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Dark blue gradient theme
+st.markdown("""
+<style>
+    /* Main app background - dark blue gradient */
+    .stApp {
+        background: linear-gradient(135deg, #0a1628 0%, #1a2744 25%, #1e3a5f 50%, #1a2744 75%, #0a1628 100%);
+        color: #e0e8f0;
+    }
+
+    /* Header area */
+    header[data-testid="stHeader"] {
+        background: linear-gradient(90deg, #0a1628, #1a2744) !important;
+    }
+
+    /* Sidebar - darker blue */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0d1b2a 0%, #1b2838 50%, #0d1b2a 100%) !important;
+    }
+    [data-testid="stSidebar"] * {
+        color: #c0d0e0 !important;
+    }
+
+    /* Custom title banner */
+    .formate-title {
+        background: linear-gradient(90deg, #1e3a5f, #2a5298, #1e3a5f);
+        border-radius: 12px;
+        padding: 1.5rem 2rem;
+        margin-bottom: 1rem;
+        text-align: center;
+        border: 1px solid #2a5298;
+        box-shadow: 0 4px 20px rgba(42, 82, 152, 0.3);
+    }
+    .formate-title h1 {
+        color: #ffffff !important;
+        margin: 0;
+        font-size: 2.2rem;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    .formate-title p {
+        color: #8ab4f8 !important;
+        margin: 0.3rem 0 0 0;
+        font-size: 1rem;
+    }
+
+    /* Text and heading colors */
+    h1, h2, h3, h4, h5, h6, .stMarkdown, p, span, label {
+        color: #e0e8f0 !important;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, #162a46, #1e3a5f) !important;
+        border: 1px solid #2a5298;
+        border-radius: 10px;
+        padding: 1rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    [data-testid="stMetricValue"] {
+        color: #8ab4f8 !important;
+    }
+    [data-testid="stMetricLabel"] {
+        color: #a0b8d0 !important;
+    }
+
+    /* Buttons */
+    .stButton > button[kind="primary"],
+    .stButton > button {
+        background: linear-gradient(90deg, #2a5298, #3b7dd8) !important;
+        color: #ffffff !important;
+        border: 1px solid #4a8de8 !important;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+    }
+    .stButton > button:hover {
+        background: linear-gradient(90deg, #3b7dd8, #4a9af5) !important;
+        box-shadow: 0 4px 15px rgba(42, 82, 152, 0.5);
+    }
+
+    /* File uploader */
+    [data-testid="stFileUploader"] {
+        background: rgba(26, 39, 68, 0.5);
+        border: 1px dashed #2a5298;
+        border-radius: 10px;
+        padding: 1rem;
+    }
+
+    /* Expanders */
+    .streamlit-expanderHeader {
+        background: rgba(30, 58, 95, 0.5) !important;
+        border-radius: 8px;
+        color: #e0e8f0 !important;
+    }
+
+    /* Info/Success/Warning/Error boxes */
+    .stAlert {
+        border-radius: 8px;
+    }
+    [data-testid="stAlert"] {
+        background: rgba(26, 39, 68, 0.7) !important;
+        border-left: 4px solid #2a5298;
+    }
+
+    /* Dataframe */
+    .stDataFrame {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    /* Selectbox and inputs */
+    .stSelectbox > div > div,
+    .stTextInput > div > div {
+        background: #162a46 !important;
+        color: #e0e8f0 !important;
+        border-color: #2a5298 !important;
+    }
+
+    /* Horizontal rules */
+    hr {
+        border-color: #2a5298 !important;
+        opacity: 0.5;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+        background: #0a1628;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #2a5298;
+        border-radius: 4px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Header
-st.title("🏋️ ForMate - AI Exercise Form Analysis")
-st.markdown("---")
+st.markdown("""
+<div class="formate-title">
+    <h1>🏋️ ForMate</h1>
+    <p>AI-Powered Exercise Form Analysis</p>
+</div>
+""", unsafe_allow_html=True)
 
 # Sidebar for configuration
 with st.sidebar:
