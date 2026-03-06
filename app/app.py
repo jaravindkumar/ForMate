@@ -1663,7 +1663,7 @@ async function toggleCamera(){
         const blob=new Blob(recordedChunks,{type:"video/webm"});
         const url=URL.createObjectURL(blob);
         const a=document.createElement("a");
-        a.href=url;a.download="formate_live_session.webm";
+        a.href=url;a.download="formate_live_session_"+repCount+"reps.webm";
         document.body.appendChild(a);a.click();
         document.body.removeChild(a);
         setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -1739,6 +1739,10 @@ function saveSession(){
         )
 
         if live_upload and not st.session_state.get("live_processing_done"):
+            import re as _re
+            m = _re.search(r'_(\d+)reps', live_upload.name)
+            js_rep_count = int(m.group(1)) if m else None
+
             with st.spinner("Running pipeline on live session..."):
                 tmp_dir   = Path(tempfile.mkdtemp())
                 tmp_video = tmp_dir / "live_session.mp4"
@@ -1746,9 +1750,14 @@ function saveSession(){
                 tmp_video.write_bytes(live_upload.read())
                 try:
                     result = run_pipeline(tmp_video, exercise, camera_view)
+                    # Inject JS rep count — ground truth from live counter
+                    if js_rep_count and js_rep_count > 0:
+                        sid, b_sum, g_sum, rep_df, num_reps, gold_dir = result
+                        g_sum["reps"] = js_rep_count
+                        result = (sid, b_sum, g_sum, rep_df, js_rep_count, gold_dir)
+                        st.session_state.live_rep_count = js_rep_count
                     st.session_state.live_results = result
                     st.session_state.live_processing_done = True
-                    # Don't rerun — just fall through to results below
                 except Exception as e:
                     st.error(f"Pipeline error: {e}")
 
