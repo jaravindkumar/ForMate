@@ -780,6 +780,7 @@ for key, default in [
     ("live_last_move",     None),
     ("live_results",       None),
     ("live_annotated_vid", None),
+    ("live_processing_done", False),
     ("upload_results",     None),
 ]:
     if key not in st.session_state:
@@ -866,9 +867,9 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
 .badge.err{background:rgba(30,58,138,.2);border:1px solid rgba(59,130,246,.3);color:#93C5FD;}
 .flags{display:flex;gap:.35rem;flex-wrap:wrap;}
 .flag{font-size:.65rem;font-weight:700;padding:.22rem .6rem;border-radius:10px;}
-.flag.ok  {background:rgba(29,78,216,.12);border:1px solid rgba(59,130,246,.25);color:#93C5FD;}
-.flag.warn{background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.25);color:#60A5FA;}
-.flag.bad {background:rgba(30,58,138,.25);border:1px solid rgba(96,165,250,.4);color:#BFDBFE;}
+.flag.ok  {background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);color:#93C5FD;}
+.flag.warn{background:rgba(255,170,0,.15);border:1px solid rgba(255,170,0,.4);color:#FFD060;}
+.flag.bad {background:rgba(255,68,68,.18);border:1px solid rgba(255,68,68,.45);color:#FF9090;}
 </style>
 </head>
 <body>
@@ -920,16 +921,16 @@ function jointColor(idx,flags){
   let w="ok";
   for(const[k,jts] of Object.entries(KEY_JOINTS)){
     if(!flags[k]||!jts.includes(idx))continue;
-    if(flags[k].st==="bad")return"#E0F2FE";
+    if(flags[k].st==="bad")return"#FF4444";
     if(flags[k].st==="warn")w="warn";
   }
-  return w==="warn"?"#93C5FD":"#3B82F6";
+  return w==="warn"?"#FFAA00":"#3B82F6";
 }
 
 function drawSkeleton(ctx,kp,flags,W,H){
   const px=i=>kp[i].x*W, py=i=>kp[i].y*H, vs=i=>kp[i]?kp[i].score:0;
   const sts=Object.values(flags).map(f=>f.st);
-  const cc=sts.includes("bad")?"#E0F2FE":sts.includes("warn")?"#93C5FD":"#3B82F6";
+  const cc=sts.includes("bad")?"#FF4444":sts.includes("warn")?"#FFAA00":"#3B82F6";
   ctx.lineWidth=3; ctx.lineCap="round";
   for(const[a,b] of CONNS){
     if(vs(a)<.3||vs(b)<.3)continue;
@@ -946,7 +947,7 @@ function drawSkeleton(ctx,kp,flags,W,H){
   let yo=30;ctx.font="bold 14px Arial,sans-serif";ctx.globalAlpha=1;
   for(const[k,{st,lbl}] of Object.entries(flags)){
     if(st==="ok")continue;
-    const col=st==="bad"?"#E0F2FE":"#60A5FA";
+    const col=st==="bad"?"#FF4444":"#FFAA00";
     const tw=ctx.measureText(lbl).width;
     ctx.fillStyle="rgba(0,0,0,.8)";ctx.fillRect(10,yo-16,tw+18,24);
     ctx.fillStyle=col;ctx.fillText(lbl,19,yo);yo+=30;
@@ -1089,9 +1090,9 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   display:flex;flex-direction:column;gap:.3rem;z-index:10;}
 .flag{font-size:.7rem;font-weight:600;padding:.3rem .7rem;border-radius:8px;
   backdrop-filter:blur(8px);letter-spacing:.02em;}
-.flag.ok  {background:rgba(56,189,248,.15);border:1px solid rgba(56,189,248,.3);color:#BAE6FD;}
-.flag.warn{background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3);color:#BAE6FD;}
-.flag.bad {background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.35);color:#BFDBFE;}
+.flag.ok  {background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);color:#93C5FD;}
+.flag.warn{background:rgba(255,170,0,.15);border:1px solid rgba(255,170,0,.4);color:#FFD060;}
+.flag.bad {background:rgba(255,68,68,.18);border:1px solid rgba(255,68,68,.45);color:#FF9090;}
 
 /* BOTTOM CONTROLS */
 #controls{position:absolute;bottom:0;left:0;right:0;padding:.75rem 1rem 1.5rem;
@@ -1200,21 +1201,50 @@ function checkThresholds(kp,W,H){
   const ok=(...ids)=>ids.every(i=>xn(i)!==null);
   const f={};
   if(EXERCISE==="deadlift"){
+    // Back angle: shoulder(5)-hip(11)-knee(13) — higher angle = straighter
     if(ok(5,11,13)){
       const a=angleDeg(xn(5),yn(5),xn(11),yn(11),xn(13),yn(13));
       f.back=a>=145?{st:"ok",lbl:"Back OK"}:a>=115?{st:"warn",lbl:"Back rounding"}:{st:"bad",lbl:"Back round!"};
     }
-    if(ok(5,11)){const d=Math.abs(xn(5)-xn(11));
-      f.drift=d<.07?{st:"ok",lbl:"Bar OK"}:d<.14?{st:"warn",lbl:"Bar drifting"}:{st:"bad",lbl:"Bar too far!"};}
-    if(ok(11,13)){const d=yn(13)-yn(11);
-      f.hinge=d>.05?{st:"ok",lbl:"Hinge OK"}:{st:"warn",lbl:"Hinge deeper"};}
+    // Bar drift: horizontal distance shoulder vs hip (side view)
+    if(ok(5,11)){
+      const d=Math.abs(xn(5)-xn(11));
+      f.drift=d<.08?{st:"ok",lbl:"Bar OK"}:d<.16?{st:"warn",lbl:"Bar drifting"}:{st:"bad",lbl:"Bar too far!"};
+    }
+    // Hinge: knee Y should be clearly below hip Y (knee in front/lower)
+    if(ok(11,13)){
+      const d=yn(13)-yn(11); // positive = knee lower than hip (good)
+      f.hinge=d>.04?{st:"ok",lbl:"Hinge OK"}:{st:"warn",lbl:"Hinge deeper"};
+    }
   }else{
-    if(ok(11,13)){const c=xn(13)-xn(11);
-      f.knee=c>=-.02?{st:"ok",lbl:"Knees OK"}:c>=-.07?{st:"warn",lbl:"Knee caving"}:{st:"bad",lbl:"Knee cave!"};}
-    if(ok(11,13)){const d=yn(11)-yn(13);
-      f.depth=d<=.04?{st:"ok",lbl:"Good depth"}:d<=.14?{st:"warn",lbl:"Go deeper"}:{st:"bad",lbl:"Too shallow"};}
-    if(ok(5,11)){const l=Math.abs(xn(5)-xn(11));
-      f.lean=l<.07?{st:"ok",lbl:"Upright OK"}:l<.14?{st:"warn",lbl:"Leaning fwd"}:{st:"bad",lbl:"Too much lean!"};}
+    // SQUAT
+    // Knee cave: left knee X should NOT be inside (greater than) left hip X
+    // Only fire during descent — check hip is below standing threshold
+    if(ok(11,12,13,14)){
+      // Use both sides — check if knees are collapsing inward
+      const hipW=Math.abs(xn(12)-xn(11));  // hip width
+      const kneeW=Math.abs(xn(14)-xn(13)); // knee width
+      // knees caving = knee width < hip width significantly
+      const ratio = hipW>0.01 ? kneeW/hipW : 1;
+      f.knee=ratio>=0.75?{st:"ok",lbl:"Knees OK"}:ratio>=0.55?{st:"warn",lbl:"Knee caving"}:{st:"bad",lbl:"Knee cave!"};
+    }
+    // Squat depth: hip Y vs knee Y — in squat, hip drops toward knee level
+    // hip Y approaches knee Y from above (both increase downward)
+    // gap = knee Y - hip Y → smaller gap = deeper squat
+    if(ok(11,13)){
+      const gap=yn(13)-yn(11); // knee Y minus hip Y (both normalised 0-1)
+      // gap shrinks as you squat — parallel = gap ~0, standing = gap ~0.2+
+      f.depth=gap<=.08?{st:"ok",lbl:"Good depth"}:gap<=.16?{st:"warn",lbl:"Go deeper"}:{st:"bad",lbl:"Too shallow"};
+    }
+    // Forward lean: trunk angle from vertical
+    // use shoulder Y vs hip Y relative to their X offset
+    if(ok(5,11)){
+      const dx=Math.abs(xn(5)-xn(11));
+      const dy=Math.abs(yn(5)-yn(11));
+      // lean angle = atan(dx/dy) — 0 = vertical, higher = leaning
+      const lean=dy>0.01?dx/dy:0;
+      f.lean=lean<.25?{st:"ok",lbl:"Upright OK"}:lean<.45?{st:"warn",lbl:"Leaning fwd"}:{st:"bad",lbl:"Too much lean!"};
+    }
   }
   return f;
 }
@@ -1223,10 +1253,10 @@ function jointColor(idx,flags){
   let w="ok";
   for(const[k,jts]of Object.entries(KEY_JOINTS)){
     if(!flags[k]||!jts.includes(idx))continue;
-    if(flags[k].st==="bad")return"#E0F2FE";
+    if(flags[k].st==="bad")return"#FF4444";   // red = bad form
     if(flags[k].st==="warn")w="warn";
   }
-  return w==="warn"?"#93C5FD":"#3B82F6";
+  return w==="warn"?"#FFAA00":"#3B82F6";       // orange = warn, blue = ok
 }
 
 // ── draw skeleton — MoveNet returns PIXEL coords ─────────────────
@@ -1244,7 +1274,7 @@ function drawSkeleton(ctx,kp,flags,vW,vH,rW,rH,offX,offY){
   const py=i=>kp[i]?offY+kp[i].y/vH*rH:0;
   const vs=i=>kp[i]?kp[i].score:0;
   const sts=Object.values(flags).map(f=>f.st);
-  const cc=sts.includes("bad")?"#E0F2FE":sts.includes("warn")?"#93C5FD":"#3B82F6";
+  const cc=sts.includes("bad")?"#FF4444":sts.includes("warn")?"#FFAA00":"#3B82F6";
 
   // connections
   ctx.lineWidth=4;ctx.lineCap="round";
@@ -1265,7 +1295,7 @@ function drawSkeleton(ctx,kp,flags,vW,vH,rW,rH,offX,offY){
   let yo=offY+32;ctx.font="bold 15px Arial,sans-serif";ctx.globalAlpha=1;
   for(const[k,{st,lbl}]of Object.entries(flags)){
     if(st==="ok")continue;
-    const col=st==="bad"?"#E0F2FE":"#60A5FA";
+    const col=st==="bad"?"#FF4444":"#FFAA00";
     const tw=ctx.measureText(lbl).width;
     ctx.fillStyle="rgba(0,0,0,.78)";ctx.fillRect(10,yo-17,tw+18,24);
     ctx.fillStyle=col;ctx.fillText(lbl,19,yo);yo+=30;
@@ -1698,25 +1728,29 @@ function saveSession(){
     # Simpler: we embed a second tiny component that writes to a shared temp file.
 
     st.markdown('<p class="lbl" style="margin-top:1rem">Live Session Analysis</p>', unsafe_allow_html=True)
-    live_upload = st.file_uploader(
-        "Session video will appear here automatically after stopping — or upload manually",
-        type=["mp4","mov","webm"],
-        key="live_video_upload",
-        label_visibility="visible"
-    )
 
-    if live_upload:
-        with st.spinner("Running pipeline on live session..."):
-            tmp_dir   = Path(tempfile.mkdtemp())
-            tmp_video = tmp_dir / "live_session.mp4"
-            live_upload.seek(0)
-            tmp_video.write_bytes(live_upload.read())
-            try:
-                result = run_pipeline(tmp_video, exercise, camera_view)
-                st.session_state.live_results = result
-                st.rerun()
-            except Exception as e:
-                st.error(f"Pipeline error: {e}")
+    # Guard: don't re-process if we already have results for this upload
+    if not st.session_state.live_results:
+        live_upload = st.file_uploader(
+            "Session video will appear here automatically after stopping — or upload manually",
+            type=["mp4","mov","webm"],
+            key="live_video_upload",
+            label_visibility="visible"
+        )
+
+        if live_upload and not st.session_state.get("live_processing_done"):
+            with st.spinner("Running pipeline on live session..."):
+                tmp_dir   = Path(tempfile.mkdtemp())
+                tmp_video = tmp_dir / "live_session.mp4"
+                live_upload.seek(0)
+                tmp_video.write_bytes(live_upload.read())
+                try:
+                    result = run_pipeline(tmp_video, exercise, camera_view)
+                    st.session_state.live_results = result
+                    st.session_state.live_processing_done = True
+                    # Don't rerun — just fall through to results below
+                except Exception as e:
+                    st.error(f"Pipeline error: {e}")
 
     # Live results
     if st.session_state.live_results:
@@ -1727,12 +1761,13 @@ function saveSession(){
         render_results(sid, gold_dir, b_sum, g_sum, rep_df, num_reps, exercise, live_vid=live_vid)
 
         if st.button("New Session", key="new_live"):
-            st.session_state.live_results       = None
-            st.session_state.live_rep_count     = 0
-            st.session_state.live_frames        = []
-            st.session_state.live_landmarks     = []
-            st.session_state.live_started       = False
-            st.session_state.live_annotated_vid = None
+            st.session_state.live_results           = None
+            st.session_state.live_rep_count         = 0
+            st.session_state.live_frames            = []
+            st.session_state.live_landmarks         = []
+            st.session_state.live_started           = False
+            st.session_state.live_annotated_vid     = None
+            st.session_state.live_processing_done   = False
             st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
