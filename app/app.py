@@ -1071,83 +1071,158 @@ with tab_live:
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{width:100%;height:100%;background:#07070F;overflow:hidden;font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
-#cam-container{position:relative;width:100%;height:100vh;background:#07070F;overflow:hidden;}
+html,body{width:100%;height:100%;overflow:hidden;
+  font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+#cam-container{position:relative;width:100%;height:100vh;
+  background:#000;overflow:hidden;}
 video{position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;}
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
-/* TOP HUD */
-#hud-top{position:absolute;top:0;left:0;right:0;padding:.8rem 1rem .6rem;
-  background:linear-gradient(to bottom,rgba(7,7,15,.8) 0%,transparent 100%);
-  display:flex;align-items:flex-start;justify-content:space-between;z-index:10;}
-#rep-num{font-size:5.5rem;font-weight:800;line-height:1;
-  color:#60A5FA;
-  font-family:'Inter',system-ui,sans-serif;
-  text-shadow:0 0 40px rgba(59,130,246,.4);transition:color .15s;}
-#rep-sub{font-size:.5rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;
-  color:rgba(255,255,255,.4);margin-top:.15rem;}
-#rep-ex{font-size:.55rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
-  color:#3B82F6;opacity:1;margin-top:.1rem;}
-#status-badge{font-size:.58rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
-  padding:.3rem .8rem;border-radius:20px;backdrop-filter:blur(8px);
-  background:rgba(7,7,15,.6);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);}
-#status-badge.waiting{border-color:rgba(96,165,250,.5);color:#93C5FD;background:rgba(96,165,250,.08);}
-#status-badge.active{border-color:rgba(29,78,216,.7);color:#60A5FA;background:rgba(29,78,216,.15);}
-#status-badge.done{border-color:rgba(56,189,248,.5);color:#93C5FD;background:rgba(56,189,248,.08);}
+/* ── TOP HUD ── */
+#hud-top{
+  position:absolute;top:0;left:0;right:0;
+  padding:1rem 1.1rem .8rem;
+  background:linear-gradient(to bottom,rgba(0,0,0,.75) 0%,transparent 100%);
+  display:flex;align-items:flex-start;justify-content:space-between;
+  z-index:10;}
+
+/* Rep counter block */
+#rep-block{display:flex;flex-direction:column;gap:0;}
+#rep-num{
+  font-family:'Space Grotesk',sans-serif;
+  font-size:6rem;font-weight:700;line-height:.95;
+  color:#fff;
+  text-shadow:0 2px 32px rgba(37,99,235,.5);
+  transition:color .12s;}
+#rep-sub{
+  font-size:.5rem;font-weight:700;letter-spacing:.25em;
+  text-transform:uppercase;color:rgba(255,255,255,.35);
+  margin-top:.15rem;}
+#rep-ex{
+  font-size:.58rem;font-weight:600;letter-spacing:.18em;
+  text-transform:uppercase;
+  color:#3B82F6;margin-top:.1rem;}
+
+/* Status pill */
+#status-badge{
+  font-size:.55rem;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;padding:.32rem .9rem;
+  border-radius:20px;backdrop-filter:blur(12px);
+  background:rgba(0,0,0,.5);
+  border:1px solid rgba(255,255,255,.12);
+  color:rgba(255,255,255,.4);}
+#status-badge.waiting{
+  border-color:rgba(59,130,246,.5);color:#93C5FD;
+  background:rgba(37,99,235,.12);}
+#status-badge.active{
+  border-color:rgba(255,255,255,.3);color:#fff;
+  background:rgba(37,99,235,.2);}
+#status-badge.done{
+  border-color:rgba(59,130,246,.4);color:#60A5FA;
+  background:rgba(29,78,216,.15);}
 
 /* FPS */
-#fps-badge{position:absolute;top:.8rem;left:50%;transform:translateX(-50%);
-  font-size:.55rem;font-weight:600;background:rgba(7,7,15,.65);
-  border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:.2rem .55rem;
-  color:rgba(255,255,255,.3);z-index:10;white-space:nowrap;letter-spacing:.04em;}
+#fps-badge{
+  position:absolute;top:.9rem;left:50%;transform:translateX(-50%);
+  font-size:.5rem;font-weight:600;letter-spacing:.06em;
+  background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.07);
+  border-radius:6px;padding:.18rem .5rem;
+  color:rgba(255,255,255,.25);z-index:10;white-space:nowrap;}
 
-/* FORM FLAGS */
-#flags-wrap{position:absolute;bottom:5.5rem;left:.75rem;
-  display:flex;flex-direction:column;gap:.3rem;z-index:10;}
-.flag{font-size:.7rem;font-weight:600;padding:.3rem .7rem;border-radius:8px;
-  backdrop-filter:blur(8px);letter-spacing:.02em;}
-.flag.ok  {background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);color:#93C5FD;}
-.flag.warn{background:rgba(255,170,0,.15);border:1px solid rgba(255,170,0,.4);color:#FFD060;}
-.flag.bad {background:rgba(255,68,68,.18);border:1px solid rgba(255,68,68,.45);color:#FF9090;}
+/* ── FORM FLAGS ── */
+#flags-wrap{
+  position:absolute;bottom:6rem;left:.85rem;
+  display:flex;flex-direction:column;gap:.35rem;z-index:10;}
+.flag{
+  font-size:.68rem;font-weight:600;letter-spacing:.04em;
+  padding:.32rem .75rem;border-radius:8px;
+  backdrop-filter:blur(10px);}
+.flag.ok  {background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);}
+.flag.warn{background:rgba(255,170,0,.15);border:1px solid rgba(255,170,0,.45);color:#FFCC55;}
+.flag.bad {background:rgba(220,38,38,.2);border:1px solid rgba(220,38,38,.5);color:#FCA5A5;}
 
-/* BOTTOM CONTROLS */
-#controls{position:absolute;bottom:0;left:0;right:0;padding:.75rem 1rem 1.5rem;
-  background:linear-gradient(to top,rgba(7,7,15,.85) 0%,transparent 100%);
-  display:flex;gap:.6rem;align-items:center;justify-content:center;z-index:10;}
-#btn-main{flex:1;max-width:260px;font-weight:700;font-size:.88rem;
-  letter-spacing:.08em;text-transform:uppercase;
-  border:none;border-radius:50px;padding:.9rem 1.5rem;cursor:pointer;transition:all .2s;
-  font-family:'Inter',system-ui,sans-serif;}
+/* ── BOTTOM CONTROLS ── */
+#controls{
+  position:absolute;bottom:0;left:0;right:0;
+  padding:.85rem 1.1rem 2rem;
+  background:linear-gradient(to top,rgba(0,0,0,.82) 0%,transparent 100%);
+  display:flex;gap:.65rem;align-items:center;justify-content:center;
+  z-index:10;}
+
+/* Main CTA */
+#btn-main{
+  flex:1;max-width:240px;
+  font-family:'Space Grotesk',sans-serif;
+  font-weight:700;font-size:.85rem;
+  letter-spacing:.1em;text-transform:uppercase;
+  border:none;border-radius:14px;
+  padding:.95rem 1.5rem;cursor:pointer;transition:all .18s;}
 #btn-main.start{
-  background:linear-gradient(135deg,#1D4ED8,#2563EB);
-  color:#fff;
-  box-shadow:0 4px 24px rgba(37,99,235,.4);}
-#btn-main.start:active{transform:scale(.97);}
-#btn-main.stop{background:rgba(30,58,138,.3);color:#93C5FD;border:1px solid rgba(59,130,246,.4);box-shadow:none;}
-#btn-save{font-weight:600;font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;
-  border:1px solid rgba(59,130,246,.35);border-radius:50px;padding:.75rem 1.25rem;
-  background:rgba(37,99,235,.1);color:#60A5FA;cursor:pointer;
-  backdrop-filter:blur(8px);display:none;
-  font-family:'Inter',system-ui,sans-serif;}
-#btn-flip{width:44px;height:44px;border-radius:50%;
-  border:1px solid rgba(255,255,255,.12);
-  background:rgba(7,7,15,.6);color:rgba(255,255,255,.7);font-size:1.1rem;cursor:pointer;
-  backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;
-  flex-shrink:0;display:none;transition:border-color .2s;}
-#btn-flip:active{border-color:rgba(29,78,216,.7);}
-#btn-voice{width:44px;height:44px;border-radius:50%;
-  border:1px solid rgba(59,130,246,.35);
-  background:rgba(29,78,216,.15);color:#60A5FA;font-size:1.1rem;cursor:pointer;
-  backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;
-  flex-shrink:0;transition:all .2s;}
-#btn-voice.muted{border-color:rgba(255,255,255,.1);background:rgba(7,7,15,.5);
-  color:rgba(255,255,255,.25);}
+  background:#1D4ED8;color:#fff;
+  box-shadow:0 4px 28px rgba(29,78,216,.5);}
+#btn-main.start:active{transform:scale(.96);box-shadow:none;}
+#btn-main.stop{
+  background:rgba(255,255,255,.08);color:#fff;
+  border:1.5px solid rgba(255,255,255,.2);
+  box-shadow:none;}
+#btn-main.stop:active{background:rgba(255,255,255,.14);}
 
-/* OFF STATE */
-#cam-off{position:absolute;inset:0;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:1rem;
-  background:#07070F;z-index:5;}
+/* Save button */
+#btn-save{
+  font-family:'Space Grotesk',sans-serif;
+  font-weight:700;font-size:.72rem;
+  letter-spacing:.08em;text-transform:uppercase;
+  border:1.5px solid #1D4ED8;border-radius:14px;
+  padding:.85rem 1.1rem;
+  background:rgba(29,78,216,.12);color:#60A5FA;
+  cursor:pointer;backdrop-filter:blur(8px);
+  display:none;white-space:nowrap;}
+#btn-save:active{background:rgba(29,78,216,.25);}
+
+/* Icon buttons (flip + voice) */
+.icon-btn{
+  width:48px;height:48px;border-radius:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;transition:all .18s;
+  backdrop-filter:blur(10px);}
+#btn-flip{
+  border:1.5px solid rgba(255,255,255,.15);
+  background:rgba(255,255,255,.07);
+  display:none;}
+#btn-flip:active{background:rgba(255,255,255,.15);}
+#btn-voice{
+  border:1.5px solid rgba(29,78,216,.5);
+  background:rgba(29,78,216,.18);}
+#btn-voice:active{background:rgba(29,78,216,.35);}
+#btn-voice.muted{
+  border-color:rgba(255,255,255,.12);
+  background:rgba(255,255,255,.05);}
+
+/* ── CAM OFF SCREEN ── */
+#cam-off{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:1.25rem;
+  background:linear-gradient(160deg,#000 0%,#0A0F1E 60%,#0D1533 100%);
+  z-index:5;}
+.cam-icon-wrap{
+  width:80px;height:80px;border-radius:22px;
+  background:rgba(29,78,216,.15);
+  border:1.5px solid rgba(29,78,216,.35);
+  display:flex;align-items:center;justify-content:center;
+  animation:glow 2.5s ease-in-out infinite;}
+@keyframes glow{
+  0%,100%{box-shadow:0 0 0 0 rgba(29,78,216,.0);}
+  50%{box-shadow:0 0 24px 6px rgba(29,78,216,.25);}}
+.cam-icon-wrap svg{width:38px;height:38px;}
+.cam-tagline{
+  font-size:.72rem;color:rgba(255,255,255,.28);
+  max-width:190px;text-align:center;line-height:1.65;
+  letter-spacing:.02em;}
+
+/* ── ANIMATIONS ── */
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:.15;}}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
 .pulsing{animation:pulse .8s infinite;}
@@ -1156,15 +1231,23 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
 <body>
 <div id="cam-container">
   <div id="cam-off">
-    <div style="font-size:3rem">&#128247;</div>
-    <div style="font-size:.95rem;font-weight:700;font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;"><span style="background:linear-gradient(135deg,#1D4ED8,#2563EB);-webkit-background-clip:text;-webkit-text-fill-color:transparent">FORM</span><span style="color:rgba(255,255,255,.6)">ate</span></div>
-    <div style="font-size:.72rem;color:#1D1D28;max-width:200px;text-align:center;line-height:1.6">
-      Point camera at your full body. MoveNet tracks your skeleton in real-time.</div>
+    <div class="cam-icon-wrap">
+      <!-- Custom camera SVG icon -->
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M23 19C23 19.5304 22.7893 20.0391 22.4142 20.4142C22.0391 20.7893 21.5304 21 21 21H3C2.46957 21 1.96086 20.7893 1.58579 20.4142C1.21071 20.0391 1 19.5304 1 19V8C1 7.46957 1.21071 6.96086 1.58579 6.58579C1.96086 6.21071 2.46957 6 3 6H7L9 3H15L17 6H21C21.5304 6 22.0391 6.21071 22.4142 6.58579C22.7893 6.96086 23 7.46957 23 8V19Z" stroke="#3B82F6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="12" cy="13" r="4" stroke="#60A5FA" stroke-width="1.5"/>
+        <circle cx="12" cy="13" r="1.5" fill="#93C5FD"/>
+      </svg>
+    </div>
+    <div style="font-family:'Space Grotesk',sans-serif;font-size:1.1rem;font-weight:700;letter-spacing:-.02em;color:#fff;">
+      FORM<span style="color:#3B82F6;">ate</span>
+    </div>
+    <div class="cam-tagline">Point camera at your full body — step back 2–3m so MoveNet can track your skeleton</div>
   </div>
   <video id="video" autoplay playsinline muted style="display:none"></video>
   <canvas id="overlay"></canvas>
   <div id="hud-top">
-    <div>
+    <div id="rep-block">
       <div id="rep-num">0</div>
       <div id="rep-sub">REPS</div>
       <div id="rep-ex">EXERCISE_PLACEHOLDER</div>
@@ -1174,9 +1257,20 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   <div id="fps-badge" style="display:none">-- FPS</div>
   <div id="flags-wrap"></div>
   <div id="controls">
-    <button id="btn-flip" onclick="flipCamera()">&#x1F504;</button>
+    <button id="btn-flip" class="icon-btn" onclick="flipCamera()">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.8)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M1 4v6h6"/><path d="M23 20v-6h-6"/>
+        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/>
+      </svg>
+    </button>
     <button id="btn-main" class="start" onclick="toggleCamera()">START CAMERA</button>
-    <button id="btn-voice" onclick="toggleVoice()" title="Voice feedback">&#x1F50A;</button>
+    <button id="btn-voice" class="icon-btn" onclick="toggleVoice()" title="Voice feedback">
+      <svg id="voice-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+      </svg>
+    </button>
     <button id="btn-save" onclick="saveSession()">SAVE &amp; ANALYSE</button>
   </div>
 </div>
@@ -1611,8 +1705,11 @@ async function detect(){
 function toggleVoice(){
   voiceEnabled=!voiceEnabled;
   const btn=document.getElementById("btn-voice");
-  btn.textContent=voiceEnabled?"🔊":"🔇";
-  btn.className=voiceEnabled?"":"muted";
+  const icon=document.getElementById("voice-icon");
+  btn.className=voiceEnabled?"icon-btn":"icon-btn muted";
+  if(icon){
+    icon.setAttribute("stroke", voiceEnabled?"#60A5FA":"rgba(255,255,255,.2)");
+  }
   if(voiceEnabled) speak("Voice on");
   else window.speechSynthesis.cancel();
 }
