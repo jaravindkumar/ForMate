@@ -1861,6 +1861,30 @@ function toggleVoice(){
   else window.speechSynthesis.cancel();
 }
 
+
+async function getCameraStream(facing){
+  // Portrait-native resolution for front cam, landscape for back
+  const portrait = facing === "user";
+  const constraints = {
+    audio: false,
+    video: {
+      facingMode: facing,
+      width:  { ideal: portrait ? 720  : 1280 },
+      height: { ideal: portrait ? 1280 : 720  },
+    }
+  };
+  const s = await navigator.mediaDevices.getUserMedia(constraints);
+  // Attempt to reset zoom to 1x after stream starts
+  try {
+    const track = s.getVideoTracks()[0];
+    const caps  = track.getCapabilities();
+    if(caps.zoom){
+      await track.applyConstraints({ advanced:[{ zoom: caps.zoom.min }] });
+    }
+  } catch(e){ /* zoom not supported on this device */ }
+  return s;
+}
+
 async function toggleCamera(){
   const btn=document.getElementById("btn-main");
   if(!running){
@@ -1879,9 +1903,7 @@ async function toggleCamera(){
         {modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
          enableSmoothing:true}
       );
-      stream=await navigator.mediaDevices.getUserMedia(
-        {video:{facingMode:facingMode,width:{ideal:1280},height:{ideal:720}},audio:false}
-      );
+      stream=await getCameraStream(facingMode);
       const video=document.getElementById("video");
       video.srcObject=stream;
       await new Promise(r=>video.onloadedmetadata=r);
@@ -1965,9 +1987,7 @@ async function flipCamera(){
   facingMode=facingMode==="environment"?"user":"environment";
   if(stream)stream.getTracks().forEach(t=>t.stop());
   const video=document.getElementById("video");
-  stream=await navigator.mediaDevices.getUserMedia(
-    {video:{facingMode:facingMode,width:{ideal:1280},height:{ideal:720}},audio:false}
-  );
+  stream=await getCameraStream(facingMode);
   video.srcObject=stream;
   await new Promise(r=>video.onloadedmetadata=r);
   video.play();
