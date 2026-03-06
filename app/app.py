@@ -575,6 +575,23 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
     overall = safe(scores.get("overall", 0))
     reps    = g_sum.get("reps", num_reps) or num_reps
 
+    # ── Detect poor body visibility ───────────────────────────────
+    # If pipeline scored from bad framing, scores will be near 0 or 50
+    # (50 = hinge fallback default, 0 = no data). Warn the user.
+    sym   = safe(scores.get("symmetry", 0))
+    setup = safe(scores.get("setup_consistency", 0))
+    hinge = safe(scores.get("hinge_quality", 0))
+    body_detected = not (sym == 0 and setup == 0 and reps == 0)
+    poor_framing  = (sym == 0 and setup == 0) or (overall < 5 and reps > 0)
+
+    if poor_framing:
+        st.warning(
+            "⚠️ **Body not fully visible in video.** Scores below are unreliable. "
+            "For accurate analysis, record with your **full body in frame** — "
+            "step back 2–3 metres from the camera.",
+            icon=None
+        )
+
     # Score banner
     st.markdown(
         '<div class="sbanner">'
@@ -1421,7 +1438,8 @@ function speakRepCount(n){
 
 let repCount=0,hipHist=[],repState="IDLE";
 let repStart=0,peakY=0,standY=null,botY=null,calibN=0;
-let rangeHistory=[]; // rolling range estimates
+let rangeHistory=[];
+let wakeLock=null;
 
 const CALIB=40; // frames before we start counting (~2-3s at 15fps)
 const MIN_RANGE=0.04; // min normalised hip movement to count anything
@@ -1604,6 +1622,13 @@ async function toggleCamera(){
   if(!running){
     btn.textContent="Loading...";btn.disabled=true;setStatus("loading");
     try{
+      // ── Wake Lock — keep screen on during session ───────────────
+      if('wakeLock' in navigator){
+        try{
+          wakeLock=await navigator.wakeLock.request('screen');
+          wakeLock.addEventListener('release',()=>{wakeLock=null;});
+        }catch(e){console.warn('Wake lock failed:',e);}
+      }
       // MoveNet Lightning — most reliable on mobile browsers
       detector=await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
@@ -1645,9 +1670,17 @@ async function toggleCamera(){
       btn.textContent="START CAMERA";btn.className="start";btn.disabled=false;
       setStatus("off");alert("Camera error: "+e.message);
     }
+    // Re-acquire wake lock if OS releases it (e.g. battery saver)
+    document.addEventListener('visibilitychange',async()=>{
+      if(running && document.visibilityState==='visible' && !wakeLock && 'wakeLock' in navigator){
+        try{wakeLock=await navigator.wakeLock.request('screen');}catch(e){}
+      }
+    },{once:false});
   }else{
     running=false;cancelAnimationFrame(rafId);
     if(stream)stream.getTracks().forEach(t=>t.stop());
+    // ── Release wake lock ────────────────────────────────────────
+    if(wakeLock){try{await wakeLock.release();}catch(e){}wakeLock=null;}
     document.getElementById("cam-off").style.display="flex";
     document.getElementById("fps-badge").style.display="none";
     document.getElementById("btn-flip").style.display="none";
