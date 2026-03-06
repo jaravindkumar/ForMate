@@ -1,0 +1,18 @@
+# --- UI ---
+streamlit==1.53.0
+
+# --- Data ---
+pandas==2.3.3
+numpy<2
+pyarrow==23.0.0
+
+# --- Computer vision (headless for server) ---
+opencv-python-headless==4.10.0.84
+mediapipe==0.10.21
+pillow==12.1.0
+
+# --- Pose estimation (primary model) ---
+ultralytics==8.3.40
+
+# --- Networking / LLM ---
+requests==2.32.5
