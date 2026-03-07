@@ -213,10 +213,10 @@ def run_silver(session_dir: str) -> dict:
     silver_dir = Path("pipeline") / "silver" / session_id
     silver_dir.mkdir(parents=True, exist_ok=True)
 
-    clean_path = silver_dir / "clean.parquet"
-    reps_path = silver_dir / "reps.parquet"
-    df.to_parquet(clean_path, index=False)
-    reps.to_parquet(reps_path, index=False)
+    clean_path = silver_dir / "clean.csv"
+    reps_path = silver_dir / "reps.csv"
+    df.to_csv(clean_path, index=False)
+    reps.to_csv(reps_path, index=False)
 
     summary = {
         "session_id": session_id,

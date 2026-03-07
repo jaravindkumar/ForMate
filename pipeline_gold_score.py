@@ -101,14 +101,14 @@ def compute_rep_metrics(df: pd.DataFrame, reps: pd.DataFrame) -> pd.DataFrame:
 
 def run_gold(session_id: str, exercise: str = "deadlift") -> dict:
     silver_dir = Path("pipeline") / "silver" / session_id
-    clean_path = silver_dir / "clean.parquet"
-    reps_path = silver_dir / "reps.parquet"
+    clean_path = silver_dir / "clean.csv"
+    reps_path = silver_dir / "reps.csv"
 
     if not clean_path.exists() or not reps_path.exists():
         raise FileNotFoundError(f"Missing Silver outputs in {silver_dir}")
 
-    df = pd.read_parquet(clean_path)
-    reps = pd.read_parquet(reps_path)
+    df = pd.read_csv(clean_path)
+    reps = pd.read_csv(reps_path)
 
     # Add trunk angle
     mid_sh = np.column_stack([
@@ -224,8 +224,8 @@ def run_gold(session_id: str, exercise: str = "deadlift") -> dict:
     gold_dir = Path("pipeline") / "gold" / session_id
     gold_dir.mkdir(parents=True, exist_ok=True)
 
-    rep_metrics_path = gold_dir / "metrics_reps.parquet"
-    rep_metrics.to_parquet(rep_metrics_path, index=False)
+    rep_metrics_path = gold_dir / "metrics_reps.csv"
+    rep_metrics.to_csv(rep_metrics_path, index=False)
 
     summary = {
         "session_id": session_id,
