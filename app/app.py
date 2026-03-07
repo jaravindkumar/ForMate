@@ -788,7 +788,7 @@ def run_pipeline(tmp_video, exercise, camera_view):
         g_dict = gold.run_gold(session_id=session_id, exercise=exercise)
         gold_dir = ROOT / "pipeline" / "gold" / session_id
         g_sum    = read_json(gold_dir / "summary.json")
-        rep_df   = pd.read_parquet(gold_dir / "metrics_reps.parquet")
+        rep_df   = pd.read_csv(gold_dir / "metrics_reps.csv")
         prog.progress(100)
 
     except Exception as e:
