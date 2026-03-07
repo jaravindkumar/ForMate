@@ -1081,18 +1081,11 @@ html,body{width:100%;height:100%;overflow:hidden;
 /* Video fills container — object-fit:cover crops rather than letterboxes */
 /* Front cam gets CSS mirror flip */
 video{
-  position:absolute;
-  /* Centre the video — scale transform needs this as origin */
-  top:50%;left:50%;
+  position:absolute;top:0;left:0;
   width:100%;height:100%;
-  transform:translate(-50%,-50%) scaleX(1) scale(1);
   object-fit:cover;
-  pointer-events:none;
-  transition:transform .2s ease;}
-/* Front cam mirror — combined with zoom transform via JS */
-video.mirror{
-  /* scaleX(-1) handled in JS via setVideoTransform so zoom combines */
-}
+  pointer-events:none;}
+video.mirror{ transform:scaleX(-1); }
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
 /* ── TOP HUD ── */
@@ -1285,22 +1278,6 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   font-size:.62rem;color:rgba(255,255,255,.3);
   text-align:center;max-width:200px;line-height:1.5;}
 
-/* ── ZOOM CONTROL ── */
-#zoom-ctrl{
-  display:flex;align-items:center;gap:.3rem;
-  background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.12);
-  border-radius:20px;padding:.2rem .4rem;
-  backdrop-filter:blur(8px);}
-.zoom-btn{
-  width:26px;height:26px;border-radius:50%;border:none;
-  background:transparent;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  padding:0;transition:background .15s;}
-.zoom-btn:active{background:rgba(255,255,255,.15);}
-#zoom-label{
-  font-size:.6rem;font-weight:700;color:rgba(255,255,255,.7);
-  min-width:2.2rem;text-align:center;letter-spacing:.04em;}
-
 /* ── ANIMATIONS ── */
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:.15;}}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
@@ -1352,19 +1329,7 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
       <div id="rep-sub">REPS</div>
       <div id="rep-ex">EXERCISE_PLACEHOLDER</div>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.5rem;">
-      <div id="status-badge">OFF</div>
-      <!-- Zoom control -->
-      <div id="zoom-ctrl">
-        <button class="zoom-btn" onclick="adjustZoom(-0.1)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-        <span id="zoom-label">1.0×</span>
-        <button class="zoom-btn" onclick="adjustZoom(0.1)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-      </div>
-    </div>
+    <div id="status-badge">OFF</div>
   </div>
   <div id="fps-badge" style="display:none">-- FPS</div>
   <div id="flags-wrap"></div>
@@ -1980,24 +1945,8 @@ function toggleVoice(){
 }
 
 
-// ── Orientation ───────────────────────────────────────────────────
-let camOrientation = "portrait"; // "portrait" | "landscape"
-let videoZoom = 1.0; // CSS scale — <1 zooms out, >1 zooms in
-
-function setVideoTransform(){
-  const video = document.getElementById("video");
-  if(!video) return;
-  const mirror = facingMode === "user";
-  video.style.transform =
-    `translate(-50%,-50%) scaleX(${mirror ? -videoZoom : videoZoom}) scaleY(${videoZoom})`;
-  document.getElementById("zoom-label").textContent = videoZoom.toFixed(1)+"×";
-}
-
-function adjustZoom(delta){
-  videoZoom = Math.max(0.4, Math.min(2.0, videoZoom + delta));
-  videoZoom = Math.round(videoZoom * 10) / 10; // snap to .1
-  setVideoTransform();
-}
+// ── Orientation + Camera ─────────────────────────────────────────
+let camOrientation = "portrait";
 
 function setOrientation(o){
   camOrientation = o;
@@ -2012,26 +1961,25 @@ function setOrientation(o){
 }
 
 async function getCameraStream(facing){
-  const portrait = camOrientation === "portrait" || facing === "user";
-  // Front camera always portrait — it physically crops to landscape otherwise
-  const constraints = {
-    audio: false,
-    video: {
-      facingMode: { ideal: facing },
-      width:  { ideal: portrait ? 720  : 1280 },
-      height: { ideal: portrait ? 1280 : 720  },
-      aspectRatio: { ideal: portrait ? 9/16 : 16/9 },
-    }
-  };
-  const s = await navigator.mediaDevices.getUserMedia(constraints);
+  // Front camera always portrait regardless of orientation selection
+  const portrait = (camOrientation === "portrait") || (facing === "user");
   try {
-    const track = s.getVideoTracks()[0];
-    const caps  = track.getCapabilities();
-    if(caps.zoom){
-      await track.applyConstraints({advanced:[{zoom:caps.zoom.min}]});
-    }
-  } catch(e){}
-  return s;
+    // Try ideal resolution first
+    return await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: facing },
+        width:  { ideal: portrait ? 720  : 1280 },
+        height: { ideal: portrait ? 1280 : 720  },
+      }
+    });
+  } catch(e) {
+    // Fallback — just request the camera with no size constraints
+    return await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: facing } }
+    });
+  }
 }
 
 async function toggleCamera(){
@@ -2055,7 +2003,7 @@ async function toggleCamera(){
       stream=await getCameraStream(facingMode);
       const video=document.getElementById("video");
       video.srcObject=stream;
-      setVideoTransform();
+      document.getElementById("video").className = facingMode==="user"?"mirror":"";
       await new Promise(r=>video.onloadedmetadata=r);
       video.play();
       document.getElementById("cam-off").style.display="none";
@@ -2103,8 +2051,6 @@ async function toggleCamera(){
     // Reset gesture
     repActive=false;gestureHoldCount=0;countdownActive=false;
     hideGestureOverlay();
-    videoZoom=1.0;
-    document.getElementById("zoom-label").textContent="1.0×";
     document.getElementById("cam-off").style.display="flex";
     document.getElementById("fps-badge").style.display="none";
     document.getElementById("btn-flip").style.display="none";
@@ -2142,7 +2088,7 @@ async function flipCamera(){
   const video=document.getElementById("video");
   stream=await getCameraStream(facingMode);
   video.srcObject=stream;
-  setVideoTransform();
+  document.getElementById("video").className = facingMode==="user"?"mirror":"";
   await new Promise(r=>video.onloadedmetadata=r);
   video.play();
   // Orientation picker only relevant for back camera
