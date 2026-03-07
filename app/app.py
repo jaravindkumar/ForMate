@@ -1369,8 +1369,8 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   <div id="fps-badge" style="display:none">-- FPS</div>
   <div id="flags-wrap"></div>
 
-  <!-- Gesture-to-start overlay -->
-  <div id="gesture-overlay">
+  <!-- Gesture-to-start overlay — hidden until body detected -->
+  <div id="gesture-overlay" style="display:none">
     <div id="gesture-ring-wrap">
       <svg width="88" height="88" viewBox="0 0 88 88">
         <!-- track -->
@@ -1694,19 +1694,28 @@ function checkGesture(kp, vW, vH){
 function startCountdown(){
   if(countdownActive) return;
   countdownActive=true;
-  countdownVal=3;
-  speak("3");
-  drawGestureOverlay(countdownVal);
-  const tick=setInterval(()=>{
-    countdownVal--;
+  countdownVal=5;
+  // Clear flags during countdown
+  document.getElementById("flags-wrap").innerHTML="";
+  // Show countdown in overlay
+  const el=document.getElementById("gesture-overlay");
+  if(el){
+    el.style.display="flex";
+    document.getElementById("gesture-ring-wrap").style.display="none";
+    document.getElementById("gesture-sub").style.display="none";
+  }
+  function tick(){
     if(countdownVal>0){
+      document.getElementById("gesture-hint").textContent="Starting in";
+      document.getElementById("gesture-countdown").textContent=countdownVal;
       speak(String(countdownVal));
+      countdownVal--;
+      setTimeout(tick,1000);
     } else {
-      clearInterval(tick);
+      // GO
       countdownActive=false;
       repActive=true;
       gestureHoldCount=0;
-      // Reset rep counting state fresh
       repCount=0;hipHist=[];repState="IDLE";
       calibN=0;standY=null;botY=null;rangeHistory=[];peakY=0;
       document.getElementById("rep-num").textContent="0";
@@ -1714,26 +1723,27 @@ function startCountdown(){
       setStatus("active");
       speak("Go!");
       hideGestureOverlay();
+      // Restore ring wrap for next time
+      const rw=document.getElementById("gesture-ring-wrap");
+      const gs=document.getElementById("gesture-sub");
+      if(rw) rw.style.display="";
+      if(gs) gs.style.display="";
     }
-  },1000);
-}
-
-function drawGestureOverlay(countdown){
-  const el=document.getElementById("gesture-overlay");
-  if(!el) return;
-  el.style.display="flex";
-  document.getElementById("gesture-countdown").textContent=
-    countdown!=null ? countdown : "";
+  }
+  tick();
 }
 
 function updateGestureOverlay(holdCount, isReady){
+  // Only show overlay once user is detected and in gesture phase
+  // Don't show if repActive or countdownActive
+  if(repActive || countdownActive) return;
   const el=document.getElementById("gesture-overlay");
-  if(!el||repActive||countdownActive) return;
+  if(!el) return;
   el.style.display="flex";
   const pct=Math.min(holdCount/GESTURE_HOLD,1);
   const ring=document.getElementById("gesture-ring");
   if(ring){
-    const c=2*Math.PI*36; // circumference r=36
+    const c=2*Math.PI*36;
     ring.style.strokeDashoffset= c-(c*pct);
     ring.style.stroke = pct>=1?"#fff":"#3B82F6";
   }
@@ -1886,16 +1896,12 @@ async function detect(){
     const mirror=(facingMode==="user");
     const poses=await detector.estimatePoses(video,{flipHorizontal:mirror});
     ctx.clearRect(0,0,cW,cH);
-    // Canvas overlay only — video element itself shows via CSS (object-fit:cover)
-    // No need to drawImage — skeleton draws on top of live video
+
     if(poses.length>0){
       const kp=poses[0].keypoints;
-      const flags=checkThresholds(kp,vW,vH);
-      drawSkeleton(ctx,kp,flags,vW,vH,rW,rH,offX,offY);
-      updateFlags(flags);
 
       if(!repActive && !countdownActive){
-        // ── Gesture detection phase ─────────────────────────────
+        // ── GESTURE PHASE: detect raise-hands, no skeleton yet ────
         const ready=checkGesture(kp,vW,vH);
         if(ready){
           gestureHoldCount++;
@@ -1906,18 +1912,25 @@ async function detect(){
           gestureHoldCount=0;
         }
         updateGestureOverlay(gestureHoldCount, ready);
+        // No skeleton, no flags during gesture phase
+
+      } else if(countdownActive){
+        // ── COUNTDOWN PHASE: show skeleton, no flags, overlay shows countdown
+        drawSkeleton(ctx,kp,{},vW,vH,rW,rH,offX,offY);
+
       } else if(repActive){
-        // ── Rep counting phase ──────────────────────────────────
+        // ── ACTIVE PHASE: full skeleton + flags + rep counting ────
+        hideGestureOverlay();
+        const flags=checkThresholds(kp,vW,vH);
+        drawSkeleton(ctx,kp,flags,vW,vH,rW,rH,offX,offY);
+        updateFlags(flags);
         const lh=kp[MV.L_HIP],rh=kp[MV.R_HIP];
         if(lh&&rh&&lh.score>.3&&rh.score>.3)
           updateRep(kp, vW, vH);
       }
 
-      // Record composite: draw video + skeleton onto an offscreen canvas
-      // for MediaRecorder (video element can't be captured directly cross-origin)
+      // Recording composite: video frame behind skeleton
       if(mediaRecorder && mediaRecorder.state==="recording"){
-        // Already recording canvas.captureStream — canvas has skeleton only,
-        // so also draw video frame into canvas each frame for the recording
         ctx.save();
         ctx.globalCompositeOperation="destination-over";
         if(mirror){
@@ -1930,12 +1943,19 @@ async function detect(){
       }
 
       sessionFrames.push(canvas.toDataURL("image/jpeg",.7));
+
     }else{
-      ctx.font="bold 14px Arial";ctx.fillStyle="rgba(255,255,255,.35)";
-      ctx.textAlign="center";
-      ctx.fillText("Point camera at full body",cW/2,cH-20);
-      ctx.textAlign="left";
-      if(!repActive && !countdownActive) updateGestureOverlay(0,false);
+      // No pose detected
+      if(!repActive && !countdownActive){
+        // Hide gesture overlay when body not in frame
+        hideGestureOverlay();
+        // Simple hint text
+        ctx.font="bold 13px Inter,system-ui";
+        ctx.fillStyle="rgba(255,255,255,.4)";
+        ctx.textAlign="center";
+        ctx.fillText("Point camera at your full body",cW/2,cH/2);
+        ctx.textAlign="left";
+      }
     }
   }catch(e){console.warn("detect:",e);}
   fpsN++;const now=performance.now();
@@ -2046,8 +2066,9 @@ async function toggleCamera(){
       calibN=0;standY=null;botY=null;sessionFrames=[];recordedChunks=[];
       rangeHistory=[];peakY=0;repStart=0;
       // Reset gesture state
-      repActive=false;gestureHoldCount=0;countdownActive=false;countdownVal=3;
+      repActive=false;gestureHoldCount=0;countdownActive=false;countdownVal=5;
       document.getElementById("rep-num").textContent="0";
+      document.getElementById("flags-wrap").innerHTML="";
       btn.textContent="STOP & ANALYSE";btn.className="stop";btn.disabled=false;
       setStatus("gesture");
       // Preload voices and greet
