@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import cv2
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 PY   = sys.executable
 
 st.set_page_config(page_title="FORMate", layout="wide", page_icon="F", initial_sidebar_state="collapsed")
@@ -736,54 +736,72 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
 
 
 def run_pipeline(tmp_video, exercise, camera_view):
-    """Run bronze/silver/gold pipeline on a video file. Returns (session_id, b_sum, g_sum, rep_df, num_reps)."""
+    """Run bronze/silver/gold pipeline in-process (no subprocesses — avoids Streamlit Cloud hangs)."""
+    import importlib.util, sys as _sys
+
     prog = st.progress(0)
     stat = st.empty()
 
-    stat.markdown('<p class="pstatus">Extracting pose data...</p>', unsafe_allow_html=True)
-    prog.progress(8)
-    t0 = time.time()
-    p  = run_cmd([PY, "pipeline_bronze_extract.py",
-                  "--video", str(tmp_video),
-                  "--exercise", exercise,
-                  "--camera_view", camera_view,
-                  "--overlay"], cwd=ROOT)
-    if p.returncode != 0:
-        st.error("Pose extraction failed.")
-        with st.expander("Error details"): st.code(p.stderr or p.stdout)
+    # ── Helper: import pipeline module from ROOT ───────────────────
+    def load_module(name):
+        path = ROOT / f"{name}.py"
+        if not path.exists():
+            raise FileNotFoundError(f"Missing: {path}")
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    # All pipeline scripts use relative Path("pipeline/...") — must run from ROOT
+    _orig_cwd = os.getcwd()
+    os.chdir(str(ROOT))
+
+    try:
+        # ── BRONZE ────────────────────────────────────────────────
+        stat.markdown('<p class="pstatus">Extracting pose data (this takes ~30s)...</p>', unsafe_allow_html=True)
+        prog.progress(5)
+        bronze = load_module("pipeline_bronze_extract")
+        session_id = bronze.extract_bronze(
+            video_path     = str(tmp_video),
+            out_root       = str(ROOT / "pipeline" / "bronze"),
+            exercise       = exercise,
+            camera_view    = camera_view,
+            write_overlay  = False,
+        )
+        b_sess = ROOT / "pipeline" / "bronze" / session_id
+        b_sum  = read_json(b_sess / "summary.json")
+        session_dir = b_sum["outputs"]["session_dir"]
+        prog.progress(40)
+
+        # ── SILVER ────────────────────────────────────────────────
+        stat.markdown('<p class="pstatus">Detecting reps...</p>', unsafe_allow_html=True)
+        prog.progress(45)
+        silver  = load_module("pipeline_silver_transform")
+        s_sum   = silver.run_silver(session_dir)
+        num_reps = s_sum.get("num_reps_detected", 0)
+        prog.progress(70)
+
+        # ── GOLD ──────────────────────────────────────────────────
+        stat.markdown('<p class="pstatus">Scoring form...</p>', unsafe_allow_html=True)
+        prog.progress(75)
+        gold   = load_module("pipeline_gold_score")
+        g_dict = gold.run_gold(session_id=session_id, exercise=exercise)
+        gold_dir = ROOT / "pipeline" / "gold" / session_id
+        g_sum    = read_json(gold_dir / "summary.json")
+        rep_df   = pd.read_parquet(gold_dir / "metrics_reps.parquet")
+        prog.progress(100)
+
+    except Exception as e:
+        import traceback
+        st.error(f"Pipeline error: {e}")
+        with st.expander("Full traceback"):
+            st.code(traceback.format_exc())
         return None
+    finally:
+        os.chdir(_orig_cwd)
+        stat.empty()
+        prog.empty()
 
-    b_sess     = latest_session_dir(ROOT / "pipeline" / "bronze", after_ts=t0)
-    b_sum      = read_json(b_sess / "summary.json")
-    session_id = b_sum["session_id"]
-    session_dir= b_sum["outputs"]["session_dir"]
-    prog.progress(35)
-
-    stat.markdown('<p class="pstatus">Detecting reps...</p>', unsafe_allow_html=True)
-    prog.progress(42)
-    p = run_cmd([PY, "pipeline_silver_transform.py", "--session_dir", session_dir], cwd=ROOT)
-    if p.returncode != 0:
-        st.error("Rep detection failed.")
-        with st.expander("Error details"): st.code(p.stderr or p.stdout)
-        return None
-    s_sum    = read_json(ROOT / "pipeline" / "silver" / session_id / "summary.json")
-    num_reps = s_sum["num_reps_detected"]
-    prog.progress(65)
-
-    stat.markdown('<p class="pstatus">Scoring form...</p>', unsafe_allow_html=True)
-    prog.progress(72)
-    p = run_cmd([PY, "pipeline_gold_score.py", "--session_id", session_id, "--exercise", exercise], cwd=ROOT)
-    if p.returncode != 0:
-        st.error("Scoring failed.")
-        with st.expander("Error details"): st.code(p.stderr or p.stdout)
-        return None
-
-    gold_dir = ROOT / "pipeline" / "gold" / session_id
-    g_sum    = read_json(gold_dir / "summary.json")
-    rep_df   = pd.read_parquet(gold_dir / "metrics_reps.parquet")
-    prog.progress(100)
-    stat.empty()
-    prog.empty()
     return session_id, b_sum, g_sum, rep_df, num_reps, gold_dir
 
 
