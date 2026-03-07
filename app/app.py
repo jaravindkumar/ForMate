@@ -1941,7 +1941,8 @@ function setOrientation(o){
 }
 
 async function getCameraStream(facing){
-  const portrait = camOrientation === "portrait";
+  const portrait = camOrientation === "portrait" || facing === "user";
+  // Front camera always portrait — it physically crops to landscape otherwise
   const constraints = {
     audio: false,
     video: {
@@ -2070,6 +2071,9 @@ async function flipCamera(){
   video.className=facingMode==="user"?"mirror":"";
   await new Promise(r=>video.onloadedmetadata=r);
   video.play();
+  // Orientation picker only relevant for back camera
+  const op=document.getElementById("orient-picker");
+  if(op) op.style.opacity = facingMode==="user"?"0.3":"1";
 }
 
 function saveSession(){
