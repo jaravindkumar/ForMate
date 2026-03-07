@@ -736,72 +736,75 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
 
 
 def run_pipeline(tmp_video, exercise, camera_view):
-    """Run bronze/silver/gold pipeline in-process (no subprocesses — avoids Streamlit Cloud hangs)."""
-    import importlib.util, sys as _sys
+    """Run bronze/silver/gold pipeline in-process."""
+    import importlib.util, traceback as _tb
 
-    prog = st.progress(0)
-    stat = st.empty()
-
-    # ── Helper: import pipeline module from ROOT ───────────────────
     def load_module(name):
         path = ROOT / f"{name}.py"
         if not path.exists():
-            raise FileNotFoundError(f"Missing: {path}")
+            raise FileNotFoundError(f"Script not found: {path}\nROOT={ROOT}\nFiles in ROOT: {list(ROOT.glob('*.py'))}")
         spec = importlib.util.spec_from_file_location(name, path)
         mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
 
-    # All pipeline scripts use relative Path("pipeline/...") — must run from ROOT
     _orig_cwd = os.getcwd()
     os.chdir(str(ROOT))
 
+    prog = st.progress(0)
+
     try:
         # ── BRONZE ────────────────────────────────────────────────
-        stat.markdown('<p class="pstatus">Extracting pose data (this takes ~30s)...</p>', unsafe_allow_html=True)
-        prog.progress(5)
-        bronze = load_module("pipeline_bronze_extract")
-        session_id = bronze.extract_bronze(
-            video_path     = str(tmp_video),
-            out_root       = str(ROOT / "pipeline" / "bronze"),
-            exercise       = exercise,
-            camera_view    = camera_view,
-            write_overlay  = False,
-        )
-        b_sess = ROOT / "pipeline" / "bronze" / session_id
-        b_sum  = read_json(b_sess / "summary.json")
-        session_dir = b_sum["outputs"]["session_dir"]
+        with st.status("Step 1/3 — Extracting pose data…", expanded=True) as s1:
+            st.write(f"Video: `{tmp_video}` ({Path(tmp_video).stat().st_size//1024} KB)")
+            st.write(f"ROOT: `{ROOT}`")
+            st.write(f"Exercise: `{exercise}`")
+            bronze = load_module("pipeline_bronze_extract")
+            session_id = bronze.extract_bronze(
+                video_path   = str(tmp_video),
+                out_root     = str(ROOT / "pipeline" / "bronze"),
+                exercise     = exercise,
+                camera_view  = camera_view,
+                write_overlay= False,
+            )
+            b_sess = ROOT / "pipeline" / "bronze" / session_id
+            b_sum  = read_json(b_sess / "summary.json")
+            session_dir = b_sum["outputs"]["session_dir"]
+            st.write(f"✅ Pose extracted — {b_sum['frames_processed']} frames, "
+                     f"{b_sum['pose_detected_frames']} detected "
+                     f"({b_sum['pose_detected_ratio']*100:.0f}%)")
+            s1.update(label="Step 1/3 — Pose extraction complete ✅", state="complete")
         prog.progress(40)
 
         # ── SILVER ────────────────────────────────────────────────
-        stat.markdown('<p class="pstatus">Detecting reps...</p>', unsafe_allow_html=True)
-        prog.progress(45)
-        silver  = load_module("pipeline_silver_transform")
-        s_sum   = silver.run_silver(session_dir)
-        num_reps = s_sum.get("num_reps_detected", 0)
+        with st.status("Step 2/3 — Detecting reps…", expanded=True) as s2:
+            silver   = load_module("pipeline_silver_transform")
+            s_sum    = silver.run_silver(session_dir)
+            num_reps = s_sum.get("num_reps_detected", 0)
+            st.write(f"✅ {num_reps} reps detected")
+            s2.update(label=f"Step 2/3 — Rep detection complete ✅  ({num_reps} reps)", state="complete")
         prog.progress(70)
 
         # ── GOLD ──────────────────────────────────────────────────
-        stat.markdown('<p class="pstatus">Scoring form...</p>', unsafe_allow_html=True)
-        prog.progress(75)
-        gold   = load_module("pipeline_gold_score")
-        g_dict = gold.run_gold(session_id=session_id, exercise=exercise)
-        gold_dir = ROOT / "pipeline" / "gold" / session_id
-        g_sum    = read_json(gold_dir / "summary.json")
-        rep_df   = pd.read_csv(gold_dir / "metrics_reps.csv")
+        with st.status("Step 3/3 — Scoring form…", expanded=True) as s3:
+            gold     = load_module("pipeline_gold_score")
+            gold.run_gold(session_id=session_id, exercise=exercise)
+            gold_dir = ROOT / "pipeline" / "gold" / session_id
+            g_sum    = read_json(gold_dir / "summary.json")
+            rep_df   = pd.read_csv(gold_dir / "metrics_reps.csv")
+            st.write(f"✅ Scoring complete")
+            s3.update(label="Step 3/3 — Scoring complete ✅", state="complete")
         prog.progress(100)
 
     except Exception as e:
-        import traceback
-        st.error(f"Pipeline error: {e}")
-        with st.expander("Full traceback"):
-            st.code(traceback.format_exc())
-        return None
-    finally:
+        st.error(f"❌ {type(e).__name__}: {e}")
+        st.code(_tb.format_exc())
         os.chdir(_orig_cwd)
-        stat.empty()
         prog.empty()
+        return None
 
+    os.chdir(_orig_cwd)
+    prog.empty()
     return session_id, b_sum, g_sum, rep_df, num_reps, gold_dir
 
 
