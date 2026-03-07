@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+
+# DECA repo + large model files (set up locally via setup script)
+DECA/
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db

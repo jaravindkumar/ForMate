@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FaceMesh 3D</title>
+  <link rel="stylesheet" href="/static/style.css" />
+
+  <!-- Three.js via importmap -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three":                          "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/":                  "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════ HEADER ═════════════════════════════════ -->
+<header>
+  <div class="logo">
+    <span class="logo-icon">⬡</span>
+    <span class="logo-text">FaceMesh <em>3D</em></span>
+  </div>
+  <p class="tagline">Single-photo 3D face reconstruction via DECA · FLAME model</p>
+</header>
+
+<!-- ═══════════════════════════════ MAIN ══════════════════════════════════ -->
+<main>
+
+  <!-- ── STEP 1: Camera ────────────────────────────────────────────────── -->
+  <section id="section-camera" class="card active">
+    <h2>Step 1 — Take your selfie</h2>
+
+    <div class="camera-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="snapshot-canvas" hidden></canvas>
+
+      <!-- overlay shown while no camera -->
+      <div id="camera-placeholder">
+        <span class="icon-big">📷</span>
+        <p>Camera off</p>
+      </div>
+
+      <!-- countdown overlay -->
+      <div id="countdown-overlay" hidden>
+        <span id="countdown-num"></span>
+      </div>
+    </div>
+
+    <div class="camera-controls">
+      <button id="btn-camera-toggle" class="btn btn-primary">
+        <span class="btn-icon">📷</span> Start Camera
+      </button>
+      <button id="btn-flip" class="btn btn-secondary" disabled title="Flip camera">
+        🔄 Flip
+      </button>
+      <button id="btn-selfie" class="btn btn-accent" disabled>
+        <span class="btn-icon">📸</span> Take Selfie
+      </button>
+    </div>
+
+    <p class="hint">
+      Look straight at the camera · Good lighting · No obstructions
+    </p>
+  </section>
+
+  <!-- ── STEP 2: Preview & confirm ────────────────────────────────────── -->
+  <section id="section-preview" class="card" hidden>
+    <h2>Step 2 — Confirm & reconstruct</h2>
+
+    <div class="preview-wrap">
+      <img id="preview-img" src="" alt="Your selfie" />
+    </div>
+
+    <div class="camera-controls">
+      <button id="btn-retake" class="btn btn-secondary">↩ Retake</button>
+      <button id="btn-reconstruct" class="btn btn-accent">
+        <span class="btn-icon">✨</span> Build 3D Mesh
+      </button>
+    </div>
+  </section>
+
+  <!-- ── STEP 3: Processing ────────────────────────────────────────────── -->
+  <section id="section-processing" class="card" hidden>
+    <div class="spinner-wrap">
+      <div class="spinner"></div>
+      <p id="processing-label">Detecting face…</p>
+      <p class="hint">DECA is fitting the FLAME model — this takes ~10–30 s on CPU</p>
+    </div>
+  </section>
+
+  <!-- ── STEP 4: Results ──────────────────────────────────────────────── -->
+  <section id="section-results" class="card" hidden>
+    <h2>3D Face Mesh</h2>
+
+    <div class="results-grid">
+
+      <!-- Three.js interactive viewer -->
+      <div class="viewer-panel">
+        <div id="three-container"></div>
+        <div class="viewer-hints">
+          <span>🖱 Drag to rotate</span>
+          <span>📦 Scroll to zoom</span>
+          <span>⇧ Right-drag to pan</span>
+        </div>
+        <div class="viewer-actions">
+          <button id="btn-auto-rotate" class="btn btn-secondary btn-sm active">⏸ Auto-rotate</button>
+          <a id="btn-download-obj" class="btn btn-secondary btn-sm" download="face_mesh.obj">⬇ Download OBJ</a>
+        </div>
+      </div>
+
+      <!-- Rendered views panel -->
+      <div class="views-panel">
+        <!-- Tab bar -->
+        <div class="tabs" id="view-tabs"></div>
+        <!-- Tab content -->
+        <div class="tab-content">
+          <img id="view-image" src="" alt="Rendered view" />
+        </div>
+
+        <div class="original-photo">
+          <p class="section-label">Original photo</p>
+          <img id="original-img" src="" alt="Input photo" />
+        </div>
+      </div>
+    </div>
+
+    <div class="result-actions">
+      <button id="btn-new" class="btn btn-primary">📷 New Selfie</button>
+    </div>
+  </section>
+
+  <!-- ── Error toast ───────────────────────────────────────────────────── -->
+  <div id="toast" class="toast" hidden></div>
+
+</main>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
