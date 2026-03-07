@@ -8,7 +8,6 @@ font            = "sans serif"
 
 [server]
 maxUploadSize   = 10     # MB — camera images are small
-enableCORS      = false
 headless        = true   # needed for cloud / headless servers
 
 [browser]

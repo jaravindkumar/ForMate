@@ -40,8 +40,16 @@ st.markdown("""
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+DECA_MODEL_FILES = [
+    DECA_DIR / "data" / "deca_model.tar",
+    DECA_DIR / "data" / "generic_model.pkl",
+]
+
 def is_deca_available() -> bool:
     return (DECA_DIR / "decalib" / "deca.py").exists()
+
+def is_deca_model_ready() -> bool:
+    return all(f.exists() for f in DECA_MODEL_FILES)
 
 
 @st.cache_resource(show_spinner="Loading DECA model (first run ~30 s)…")
@@ -55,6 +63,31 @@ def load_deca():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     deca = DECA(config=deca_cfg, device=device)
     return deca, device
+
+
+def make_demo_mesh() -> dict:
+    """Return a synthetic UV-sphere mesh for demo/testing without DECA."""
+    rows, cols = 40, 40
+    verts, faces = [], []
+    for i in range(rows + 1):
+        lat = np.pi * (-0.5 + i / rows)
+        for j in range(cols):
+            lon = 2 * np.pi * j / cols
+            x = np.cos(lat) * np.cos(lon)
+            y = np.sin(lat)
+            z = np.cos(lat) * np.sin(lon)
+            # squash z a bit to look more face-like
+            verts.append([x * 0.8, y, z * 0.6])
+    verts = np.array(verts, dtype=np.float32)
+    for i in range(rows):
+        for j in range(cols):
+            a = i * cols + j
+            b = i * cols + (j + 1) % cols
+            c = (i + 1) * cols + j
+            d = (i + 1) * cols + (j + 1) % cols
+            faces.extend([[a, b, d], [a, d, c]])
+    faces = np.array(faces, dtype=np.int64)
+    return {"verts": verts, "faces": faces, "views": {}}
 
 
 def run_reconstruction(image_pil: Image.Image, deca, device: str) -> dict:
@@ -167,20 +200,29 @@ def export_obj(verts: np.ndarray, faces: np.ndarray) -> bytes:
 st.title("⬡ FaceMesh 3D")
 st.caption("Single-photo 3D face reconstruction · **DECA** · FLAME model")
 
-# ── Setup guard ────────────────────────────────────────────────────────────────
-if not is_deca_available():
-    st.error(
-        "**DECA is not set up.**\n\n"
-        "Run the one-time setup script:\n"
-        "```bash\nbash scripts/setup_deca.sh\n```\n"
-        "Then download FLAME 2020 from https://flame.is.tue.mpg.de/ "
-        "and place the files in `DECA/data/`."
-    )
-    st.stop()
+# ── Setup status ───────────────────────────────────────────────────────────────
+DEMO_MODE = not (is_deca_available() and is_deca_model_ready())
 
-# ── Load model ─────────────────────────────────────────────────────────────────
-deca, device = load_deca()
-st.success(f"DECA ready · running on **{device.upper()}**", icon="✅")
+if DEMO_MODE:
+    missing = []
+    if not is_deca_available():
+        missing.append("`DECA/` repo — run `bash scripts/setup_deca.sh`")
+    else:
+        for f in DECA_MODEL_FILES:
+            if not f.exists():
+                missing.append(f"`{f.relative_to(DECA_DIR.parent)}`")
+    st.warning(
+        "**Demo mode** — running with a placeholder mesh. "
+        "Full DECA reconstruction requires these missing files:\n\n"
+        + "\n".join(f"- {m}" for m in missing)
+        + "\n\n**FLAME model:** register free at https://flame.is.tue.mpg.de/  \n"
+        "**DECA weights:** `deca_model.tar` — see `scripts/setup_deca.sh`"
+    )
+    deca, device = None, "cpu"
+else:
+    deca, device = load_deca()
+    st.success(f"DECA ready · running on **{device.upper()}**", icon="✅")
+
 st.divider()
 
 # ── Step 1: Camera ─────────────────────────────────────────────────────────────
@@ -203,47 +245,53 @@ with col_photo:
     st.image(image_pil, caption="Your selfie", use_container_width=True)
 
 with col_btn:
-    st.markdown(
-        "Click the button below to run **DECA** — a deep learning model "
-        "that fits a parametric 3D FLAME face model to your photo.\n\n"
-        "- Detects facial landmarks (FAN detector)\n"
-        "- Predicts shape, expression, pose, texture & lighting\n"
-        "- Outputs an interactive 3D mesh (~5 000 vertices)\n\n"
-        "⏱ ~10–30 s on CPU, ~2–5 s on GPU"
-    )
-    build_btn = st.button(
-        "✨ Build 3D Mesh",
-        type="primary",
-        use_container_width=True,
-    )
+    if DEMO_MODE:
+        st.markdown(
+            "**Demo mode** — the 3D viewer works but shows a placeholder sphere "
+            "instead of your real face mesh. Add the DECA model files to enable "
+            "full reconstruction."
+        )
+    else:
+        st.markdown(
+            "Click the button below to run **DECA** — a deep learning model "
+            "that fits a parametric 3D FLAME face model to your photo.\n\n"
+            "- Detects facial landmarks (FAN detector)\n"
+            "- Predicts shape, expression, pose, texture & lighting\n"
+            "- Outputs an interactive 3D mesh (~5 000 vertices)\n\n"
+            "⏱ ~10–30 s on CPU, ~2–5 s on GPU"
+        )
+    btn_label = "👁 Preview 3D Viewer (Demo)" if DEMO_MODE else "✨ Build 3D Mesh"
+    build_btn = st.button(btn_label, type="primary", use_container_width=True)
 
 # ── Step 3: Reconstruct ────────────────────────────────────────────────────────
 if build_btn or "result" in st.session_state:
 
     if build_btn:
-        # Clear previous result
         st.session_state.pop("result", None)
 
-        progress = st.progress(0, text="Detecting face…")
-        progress.progress(20, text="Running encoder…")
-
-        try:
-            result = run_reconstruction(image_pil, deca, device)
+        if DEMO_MODE:
+            result = make_demo_mesh()
             st.session_state["result"] = result
-        except ValueError as exc:
-            st.error(f"❌ {exc}")
-            st.stop()
-        except Exception as exc:
-            st.error(f"❌ Reconstruction failed: {exc}")
-            st.stop()
-
-        progress.progress(100, text="Done!")
-        progress.empty()
+        else:
+            progress = st.progress(0, text="Detecting face…")
+            progress.progress(20, text="Running encoder…")
+            try:
+                result = run_reconstruction(image_pil, deca, device)
+                st.session_state["result"] = result
+            except ValueError as exc:
+                st.error(f"❌ {exc}")
+                st.stop()
+            except Exception as exc:
+                st.error(f"❌ Reconstruction failed: {exc}")
+                st.stop()
+            progress.progress(100, text="Done!")
+            progress.empty()
 
     # ── Step 4: Results ────────────────────────────────────────────────────────
     result = st.session_state["result"]
     st.divider()
-    st.subheader("3D Face Mesh")
+    label = "3D Face Mesh (Demo — placeholder sphere)" if DEMO_MODE else "3D Face Mesh"
+    st.subheader(label)
 
     left, right = st.columns([3, 2], gap="large")
 
