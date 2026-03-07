@@ -1131,7 +1131,14 @@ video{
   width:100%;height:100%;
   object-fit:cover;
   pointer-events:none;}
-video.mirror{ transform:scaleX(-1); }
+/* portrait-fix — dimensions set by JS, transform set here */
+video.portrait-fix{
+  transform:translate(-50%,-50%) rotate(90deg);
+  object-fit:cover;}
+video.portrait-fix.mirror{
+  transform:translate(-50%,-50%) rotate(90deg) scaleX(-1);}
+video.normal{top:0;left:0;width:100%;height:100%;object-fit:cover;}
+video.normal.mirror{transform:scaleX(-1);}
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
 /* ── TOP HUD ── */
@@ -1892,7 +1899,11 @@ async function detect(){
   const video =document.getElementById("video");
   const canvas=document.getElementById("overlay");
   const ctx   =canvas.getContext("2d");
-  const vW=video.videoWidth||720, vH=video.videoHeight||1280;
+  // Account for rotation: if landscape stream rotated to portrait, swap dims
+  const _vW=video.videoWidth||720, _vH=video.videoHeight||1280;
+  const _rotated = video.className.includes("portrait-fix");
+  const vW = _rotated ? _vH : _vW;
+  const vH = _rotated ? _vW : _vH;
 
   const cW=canvas.offsetWidth, cH=canvas.offsetHeight;
   const scale=Math.max(cW/vW, cH/vH);
@@ -2005,23 +2016,47 @@ function setOrientation(o){
 }
 
 async function getCameraStream(facing){
-  // Request portrait resolution — width < height forces portrait sensor crop
-  // Using exact height:1280 ensures Android delivers portrait not landscape
-  const constraints = {
-    audio: false,
-    video: {
-      facingMode: { ideal: facing },
-      width:  { ideal: 720,  min: 480  },
-      height: { ideal: 1280, min: 640  },
-    }
-  };
+  // Just request the camera — don't fight the browser with size hints
   try {
-    return await navigator.mediaDevices.getUserMedia(constraints);
-  } catch(e) {
-    // Fallback with no size constraints
     return await navigator.mediaDevices.getUserMedia({
-      audio: false, video: { facingMode: { ideal: facing } }
+      audio: false,
+      video: { facingMode: { ideal: facing } }
     });
+  } catch(e) {
+    return await navigator.mediaDevices.getUserMedia({ audio:false, video:true });
+  }
+}
+
+
+function applyVideoOrientation(video){
+  const vW = video.videoWidth;
+  const vH = video.videoHeight;
+  const needsRotate = vW > vH;
+  const isMirror = facingMode === "user";
+  const container = document.getElementById("cam-container");
+  const cW = container.offsetWidth;
+  const cH = container.offsetHeight;
+
+  if(needsRotate){
+    // Stream is landscape (e.g. 1280x720), phone is portrait.
+    // Rotate 90deg. After rotation the video's rendered w/h are swapped.
+    // To fill the portrait container: set video width=cH, height=cW
+    // so after rotate(90deg) it fills width=cW, height=cH correctly.
+    video.style.position = "absolute";
+    video.style.width    = cH + "px";
+    video.style.height   = cW + "px";
+    video.style.top      = "50%";
+    video.style.left     = "50%";
+    video.style.objectFit = "cover";
+    video.className = isMirror ? "portrait-fix mirror" : "portrait-fix";
+  } else {
+    video.style.position = "absolute";
+    video.style.width    = "100%";
+    video.style.height   = "100%";
+    video.style.top      = "0";
+    video.style.left     = "0";
+    video.style.objectFit = "cover";
+    video.className = isMirror ? "normal mirror" : "normal";
   }
 }
 
@@ -2046,9 +2081,9 @@ async function toggleCamera(){
       stream=await getCameraStream(facingMode);
       const video=document.getElementById("video");
       video.srcObject=stream;
-      video.className=facingMode==="user"?"mirror":"";
       await new Promise(r=>video.onloadedmetadata=r);
       video.play();
+      applyVideoOrientation(video);
       document.getElementById("cam-off").style.display="none";
       document.getElementById("fps-badge").style.display="block";
       document.getElementById("btn-flip").style.display="flex";
@@ -2131,9 +2166,9 @@ async function flipCamera(){
   const video=document.getElementById("video");
   stream=await getCameraStream(facingMode);
   video.srcObject=stream;
-  video.className=facingMode==="user"?"mirror":"";
   await new Promise(r=>video.onloadedmetadata=r);
   video.play();
+  applyVideoOrientation(video);
 }
 
 function saveSession(){
