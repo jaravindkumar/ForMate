@@ -5,7 +5,18 @@ import streamlit as st
 import pandas as pd
 import cv2
 
-ROOT = Path(__file__).resolve().parent
+# ROOT = directory containing the pipeline scripts
+# On Streamlit Cloud, app.py may be in a subdirectory (e.g. /mount/src/formate/app/)
+# while pipeline scripts sit in the repo root (/mount/src/formate/)
+def _find_root():
+    here = Path(__file__).resolve().parent
+    if (here / "pipeline_bronze_extract.py").exists():
+        return here
+    if (here.parent / "pipeline_bronze_extract.py").exists():
+        return here.parent
+    return here  # fallback — will show clear error
+
+ROOT = _find_root()
 PY   = sys.executable
 
 st.set_page_config(page_title="FORMate", layout="wide", page_icon="F", initial_sidebar_state="collapsed")
@@ -736,62 +747,74 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
 
 
 def run_pipeline(tmp_video, exercise, camera_view):
-    """Run bronze/silver/gold pipeline on a video file."""
+    """Run bronze/silver/gold pipeline in-process."""
+    import importlib.util, traceback as _tb
+
+    def load_module(name):
+        path = ROOT / f"{name}.py"
+        if not path.exists():
+            raise FileNotFoundError(f"Script not found: {path}\nROOT={ROOT}\nFiles in ROOT: {list(ROOT.glob('*.py'))}")
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    _orig_cwd = os.getcwd()
+    os.chdir(str(ROOT))
+
     prog = st.progress(0)
-    stat = st.empty()
 
-    # Verify pipeline scripts exist
-    for script in ["pipeline_bronze_extract.py", "pipeline_silver_transform.py", "pipeline_gold_score.py"]:
-        if not (ROOT / script).exists():
-            st.error(f"Missing pipeline script: {script} (looked in {ROOT})")
-            return None
+    try:
+        # ── BRONZE ────────────────────────────────────────────────
+        with st.status("Step 1/3 — Extracting pose data…", expanded=True) as s1:
+            st.write(f"Video: `{tmp_video}` ({Path(tmp_video).stat().st_size//1024} KB)")
+            st.write(f"ROOT: `{ROOT}`")
+            st.write(f"Exercise: `{exercise}`")
+            bronze = load_module("pipeline_bronze_extract")
+            session_id = bronze.extract_bronze(
+                video_path   = str(tmp_video),
+                out_root     = str(ROOT / "pipeline" / "bronze"),
+                exercise     = exercise,
+                camera_view  = camera_view,
+                write_overlay= False,
+            )
+            b_sess = ROOT / "pipeline" / "bronze" / session_id
+            b_sum  = read_json(b_sess / "summary.json")
+            session_dir = b_sum["outputs"]["session_dir"]
+            st.write(f"✅ Pose extracted — {b_sum['frames_processed']} frames, "
+                     f"{b_sum['pose_detected_frames']} detected "
+                     f"({b_sum['pose_detected_ratio']*100:.0f}%)")
+            s1.update(label="Step 1/3 — Pose extraction complete ✅", state="complete")
+        prog.progress(40)
 
-    stat.markdown('<p class="pstatus">Extracting pose data...</p>', unsafe_allow_html=True)
-    prog.progress(8)
-    t0 = time.time()
-    p  = run_cmd([PY, str(ROOT / "pipeline_bronze_extract.py"),
-                  "--video", str(tmp_video),
-                  "--exercise", exercise,
-                  "--camera_view", camera_view,
-                  "--overlay"], cwd=str(ROOT))
-    if p.returncode != 0:
-        st.error("Pose extraction failed.")
-        with st.expander("Error details"): st.code((p.stderr or "") + "\n" + (p.stdout or ""))
+        # ── SILVER ────────────────────────────────────────────────
+        with st.status("Step 2/3 — Detecting reps…", expanded=True) as s2:
+            silver   = load_module("pipeline_silver_transform")
+            s_sum    = silver.run_silver(session_dir)
+            num_reps = s_sum.get("num_reps_detected", 0)
+            st.write(f"✅ {num_reps} reps detected")
+            s2.update(label=f"Step 2/3 — Rep detection complete ✅  ({num_reps} reps)", state="complete")
+        prog.progress(70)
+
+        # ── GOLD ──────────────────────────────────────────────────
+        with st.status("Step 3/3 — Scoring form…", expanded=True) as s3:
+            gold     = load_module("pipeline_gold_score")
+            gold.run_gold(session_id=session_id, exercise=exercise)
+            gold_dir = ROOT / "pipeline" / "gold" / session_id
+            g_sum    = read_json(gold_dir / "summary.json")
+            rep_df   = pd.read_csv(gold_dir / "metrics_reps.csv")
+            st.write(f"✅ Scoring complete")
+            s3.update(label="Step 3/3 — Scoring complete ✅", state="complete")
+        prog.progress(100)
+
+    except Exception as e:
+        st.error(f"❌ {type(e).__name__}: {e}")
+        st.code(_tb.format_exc())
+        os.chdir(_orig_cwd)
+        prog.empty()
         return None
 
-    b_sess     = latest_session_dir(ROOT / "pipeline" / "bronze", after_ts=t0)
-    if b_sess is None:
-        st.error("Bronze pipeline ran but produced no output session directory.")
-        return None
-    b_sum      = read_json(b_sess / "summary.json")
-    session_id = b_sum["session_id"]
-    session_dir= b_sum["outputs"]["session_dir"]
-    prog.progress(35)
-
-    stat.markdown('<p class="pstatus">Detecting reps...</p>', unsafe_allow_html=True)
-    prog.progress(42)
-    p = run_cmd([PY, str(ROOT / "pipeline_silver_transform.py"), "--session_dir", session_dir], cwd=str(ROOT))
-    if p.returncode != 0:
-        st.error("Rep detection failed.")
-        with st.expander("Error details"): st.code((p.stderr or "") + "\n" + (p.stdout or ""))
-        return None
-    s_sum    = read_json(ROOT / "pipeline" / "silver" / session_id / "summary.json")
-    num_reps = s_sum.get("num_reps_detected", 0)
-    prog.progress(65)
-
-    stat.markdown('<p class="pstatus">Scoring form...</p>', unsafe_allow_html=True)
-    prog.progress(72)
-    p = run_cmd([PY, str(ROOT / "pipeline_gold_score.py"), "--session_id", session_id, "--exercise", exercise], cwd=str(ROOT))
-    if p.returncode != 0:
-        st.error("Scoring failed.")
-        with st.expander("Error details"): st.code((p.stderr or "") + "\n" + (p.stdout or ""))
-        return None
-
-    gold_dir = ROOT / "pipeline" / "gold" / session_id
-    g_sum    = read_json(gold_dir / "summary.json")
-    rep_df   = pd.read_parquet(gold_dir / "metrics_reps.parquet")
-    prog.progress(100)
-    stat.empty()
+    os.chdir(_orig_cwd)
     prog.empty()
     return session_id, b_sum, g_sum, rep_df, num_reps, gold_dir
 
@@ -807,6 +830,9 @@ for key, default in [
     ("live_results",       None),
     ("live_annotated_vid", None),
     ("live_processing_done", False),
+    ("upload_results",     None),
+    ("upload_file_id",     None),
+    ("upload_tmp_video",   None),
     ("upload_results",     None),
 ]:
     if key not in st.session_state:
@@ -859,21 +885,34 @@ with tab_upload:
             unsafe_allow_html=True
         )
         st.markdown('<p class="lbl">Upload Video</p>', unsafe_allow_html=True)
-        uploaded = st.file_uploader("", type=["mp4","mov","m4v"], label_visibility="collapsed")
-        if uploaded:
+        uploaded = st.file_uploader("", type=["mp4","mov","m4v","webm"], label_visibility="collapsed")
+
+        # ── Persist uploaded file to session state immediately ─────
+        if uploaded is not None:
+            # New file uploaded — save bytes and clear old results
+            file_id = f"{uploaded.name}_{uploaded.size}"
+            if st.session_state.get("upload_file_id") != file_id:
+                st.session_state.upload_file_id = file_id
+                st.session_state.upload_results = None
+                tmp_dir = Path(tempfile.mkdtemp())
+                tmp_video = tmp_dir / uploaded.name
+                uploaded.seek(0)
+                tmp_video.write_bytes(uploaded.read())
+                st.session_state.upload_tmp_video = str(tmp_video)
+
             fname = uploaded.name
             fmb   = str(round(uploaded.size / (1024*1024), 1))
             st.markdown('<div class="fok">&#10003; ' + fname + ' &middot; ' + fmb + ' MB</div>', unsafe_allow_html=True)
+        else:
+            st.session_state.pop("upload_file_id", None)
+            st.session_state.pop("upload_tmp_video", None)
+
+        # Retrieve persisted video path
+        tmp_video_path = st.session_state.get("upload_tmp_video")
 
     with uz_r:
-        if uploaded:
-            tmp_dir   = Path(tempfile.mkdtemp())
-            tmp_video = tmp_dir / uploaded.name
-            uploaded.seek(0)
-            tmp_video.write_bytes(uploaded.read())
-
-            # Encode video as base64 so TF.js component can play it inline
-            vid_b64  = base64.b64encode(tmp_video.read_bytes()).decode()
+        if tmp_video_path and Path(tmp_video_path).exists():
+            vid_b64  = base64.b64encode(Path(tmp_video_path).read_bytes()).decode()
             ex_label = exercise
 
             upload_movenet_html = """
@@ -1051,11 +1090,9 @@ init();
                 unsafe_allow_html=True
             )
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    if uploaded:
+    if tmp_video_path and Path(tmp_video_path).exists():
         if st.button("ANALYSE FORM", type="primary", use_container_width=True, key="run_upload"):
-            result = run_pipeline(tmp_video, exercise, camera_view)
+            result = run_pipeline(tmp_video_path, exercise, camera_view)
             if result:
                 st.session_state.upload_results = result
 
@@ -1087,14 +1124,18 @@ html,body{width:100%;height:100%;overflow:hidden;
 #cam-container{position:relative;width:100%;height:100vh;
   background:#000;overflow:hidden;}
 
-/* Video fills container — object-fit:cover crops rather than letterboxes */
+/* Video uses contain — show full frame, no cropping */
 /* Front cam gets CSS mirror flip */
 video{
-  position:absolute;top:0;left:0;
+  position:absolute;top:50%;left:50%;
   width:100%;height:100%;
-  object-fit:cover;
+  transform:translate(-50%,-50%) scale(var(--vid-zoom,1));
+  transform-origin:center center;
+  object-fit:contain;
+  background:#000;
   pointer-events:none;}
-video.mirror{ transform:scaleX(-1); }
+video.mirror{ transform:translate(-50%,-50%) scale(var(--vid-zoom,1)) scaleX(-1); }
+#cam-container{ --vid-zoom:1; }
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
 /* ── TOP HUD ── */
@@ -1287,6 +1328,20 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   font-size:.62rem;color:rgba(255,255,255,.3);
   text-align:center;max-width:200px;line-height:1.5;}
 
+/* ── ZOOM SLIDER ── */
+#zoom-bar{
+  position:absolute;right:.7rem;top:50%;transform:translateY(-50%);
+  z-index:20;display:flex;flex-direction:column;align-items:center;gap:.4rem;}
+#zoom-track{
+  -webkit-appearance:none;appearance:none;
+  writing-mode:vertical-lr;direction:rtl;
+  width:4px;height:120px;
+  background:rgba(255,255,255,.15);border-radius:4px;cursor:pointer;outline:none;}
+#zoom-track::-webkit-slider-thumb{
+  -webkit-appearance:none;width:18px;height:18px;border-radius:50%;
+  background:#3B82F6;border:2px solid #fff;box-shadow:0 0 6px rgba(59,130,246,.6);}
+#zoom-lbl{font-size:.55rem;font-weight:700;color:rgba(255,255,255,.5);letter-spacing:.06em;}
+
 /* ── ANIMATIONS ── */
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:.15;}}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
@@ -1332,6 +1387,12 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   </div>
   <video id="video" autoplay playsinline muted></video>
   <canvas id="overlay"></canvas>
+  <!-- Zoom slider — drag up to zoom out -->
+  <div id="zoom-bar">
+    <span id="zoom-lbl">ZOOM</span>
+    <input id="zoom-track" type="range" min="0.3" max="1.5" step="0.05" value="1"
+           oninput="setZoom(this.value)">
+  </div>
   <div id="hud-top">
     <div id="rep-block">
       <div id="rep-num">0</div>
@@ -1857,19 +1918,25 @@ async function detect(){
   const ctx   =canvas.getContext("2d");
   const vW=video.videoWidth||720, vH=video.videoHeight||1280;
 
-  // object-fit:cover — video fills container, edges cropped (not letterboxed)
-  // Canvas must match container size; keypoint coords scale with cover math
+  // object-fit:contain — full frame visible, letterboxed
+  // Scale = fit within both dimensions, black bars fill the rest
   const cW=canvas.offsetWidth, cH=canvas.offsetHeight;
-  // Cover scale = fill both dimensions, crop the overflow
-  const scale=Math.max(cW/vW, cH/vH);
+  const scale=Math.min(cW/vW, cH/vH);
   const rW=vW*scale, rH=vH*scale;
-  const offX=(cW-rW)/2, offY=(cH-rH)/2;  // negative = cropped amount
+  const offX=(cW-rW)/2, offY=(cH-rH)/2;  // positive = letterbox bars
 
   canvas.width=cW; canvas.height=cH;
   try{
     const mirror=(facingMode==="user");
     const poses=await detector.estimatePoses(video,{flipHorizontal:mirror});
     ctx.clearRect(0,0,cW,cH);
+
+    // Apply same zoom as CSS video transform so skeleton aligns
+    const z = currentZoom;
+    ctx.save();
+    ctx.translate(cW/2, cH/2);
+    ctx.scale(mirror ? -z : z, z);
+    ctx.translate(-cW/2, -cH/2);
 
     if(poses.length>0){
       const kp=poses[0].keypoints;
@@ -1917,6 +1984,7 @@ async function detect(){
       }
 
       sessionFrames.push(canvas.toDataURL("image/jpeg",.7));
+      ctx.restore(); // end zoom transform
 
     }else{
       // No pose detected
@@ -1953,6 +2021,14 @@ function toggleVoice(){
   else window.speechSynthesis.cancel();
 }
 
+
+// ── Zoom ──────────────────────────────────────────────────────────
+let currentZoom = 1.0;
+function setZoom(val){
+  currentZoom = parseFloat(val);
+  document.getElementById("cam-container").style.setProperty("--vid-zoom", currentZoom);
+  document.getElementById("zoom-track").value = currentZoom;
+}
 
 // ── Orientation + Camera ─────────────────────────────────────────
 let camOrientation = "portrait";
@@ -2013,6 +2089,8 @@ async function toggleCamera(){
       const video=document.getElementById("video");
       video.srcObject=stream;
       document.getElementById("video").className = facingMode==="user"?"mirror":"";
+      // Default zoom — front cam zoomed out, back cam normal
+      setZoom(facingMode==="user" ? 0.55 : 1.0);
       await new Promise(r=>video.onloadedmetadata=r);
       video.play();
       document.getElementById("cam-off").style.display="none";
@@ -2100,9 +2178,8 @@ async function flipCamera(){
   document.getElementById("video").className = facingMode==="user"?"mirror":"";
   await new Promise(r=>video.onloadedmetadata=r);
   video.play();
-  // Orientation picker only relevant for back camera
-  const op=document.getElementById("orient-picker");
-  if(op) op.style.opacity = facingMode==="user"?"0.3":"1";
+  // Auto zoom-out for front cam — sensor is closer/wider crop
+  setZoom(facingMode==="user" ? 0.55 : 1.0);
 }
 
 function saveSession(){
