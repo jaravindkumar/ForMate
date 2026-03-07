@@ -820,6 +820,9 @@ for key, default in [
     ("live_annotated_vid", None),
     ("live_processing_done", False),
     ("upload_results",     None),
+    ("upload_file_id",     None),
+    ("upload_tmp_video",   None),
+    ("upload_results",     None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -871,21 +874,34 @@ with tab_upload:
             unsafe_allow_html=True
         )
         st.markdown('<p class="lbl">Upload Video</p>', unsafe_allow_html=True)
-        uploaded = st.file_uploader("", type=["mp4","mov","m4v"], label_visibility="collapsed")
-        if uploaded:
+        uploaded = st.file_uploader("", type=["mp4","mov","m4v","webm"], label_visibility="collapsed")
+
+        # ── Persist uploaded file to session state immediately ─────
+        if uploaded is not None:
+            # New file uploaded — save bytes and clear old results
+            file_id = f"{uploaded.name}_{uploaded.size}"
+            if st.session_state.get("upload_file_id") != file_id:
+                st.session_state.upload_file_id = file_id
+                st.session_state.upload_results = None
+                tmp_dir = Path(tempfile.mkdtemp())
+                tmp_video = tmp_dir / uploaded.name
+                uploaded.seek(0)
+                tmp_video.write_bytes(uploaded.read())
+                st.session_state.upload_tmp_video = str(tmp_video)
+
             fname = uploaded.name
             fmb   = str(round(uploaded.size / (1024*1024), 1))
             st.markdown('<div class="fok">&#10003; ' + fname + ' &middot; ' + fmb + ' MB</div>', unsafe_allow_html=True)
+        else:
+            st.session_state.pop("upload_file_id", None)
+            st.session_state.pop("upload_tmp_video", None)
+
+        # Retrieve persisted video path
+        tmp_video_path = st.session_state.get("upload_tmp_video")
 
     with uz_r:
-        if uploaded:
-            tmp_dir   = Path(tempfile.mkdtemp())
-            tmp_video = tmp_dir / uploaded.name
-            uploaded.seek(0)
-            tmp_video.write_bytes(uploaded.read())
-
-            # Encode video as base64 so TF.js component can play it inline
-            vid_b64  = base64.b64encode(tmp_video.read_bytes()).decode()
+        if tmp_video_path and Path(tmp_video_path).exists():
+            vid_b64  = base64.b64encode(Path(tmp_video_path).read_bytes()).decode()
             ex_label = exercise
 
             upload_movenet_html = """
@@ -1063,11 +1079,9 @@ init();
                 unsafe_allow_html=True
             )
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    if uploaded:
+    if tmp_video_path and Path(tmp_video_path).exists():
         if st.button("ANALYSE FORM", type="primary", use_container_width=True, key="run_upload"):
-            result = run_pipeline(tmp_video, exercise, camera_view)
+            result = run_pipeline(tmp_video_path, exercise, camera_view)
             if result:
                 st.session_state.upload_results = result
 
