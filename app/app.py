@@ -1077,7 +1077,15 @@ html,body{width:100%;height:100%;overflow:hidden;
   font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
 #cam-container{position:relative;width:100%;height:100vh;
   background:#000;overflow:hidden;}
-video{position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;}
+
+/* Video fills container — object-fit:cover crops rather than letterboxes */
+/* Front cam gets CSS mirror flip */
+video{
+  position:absolute;top:0;left:0;
+  width:100%;height:100%;
+  object-fit:cover;
+  pointer-events:none;}
+video.mirror{transform:scaleX(-1);}
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
 /* ── TOP HUD ── */
@@ -1245,6 +1253,31 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   font-size:.65rem;font-weight:500;letter-spacing:.08em;
   color:rgba(255,255,255,.45);text-align:center;}
 
+/* ── ORIENTATION PICKER ── */
+#orient-picker{
+  display:flex;gap:.75rem;margin-top:.25rem;}
+.orient-btn{
+  display:flex;flex-direction:column;align-items:center;gap:.5rem;
+  padding:.85rem 1.1rem;border-radius:16px;cursor:pointer;
+  border:1.5px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.05);
+  transition:all .18s;min-width:90px;}
+.orient-btn:active{transform:scale(.96);}
+.orient-btn.selected{
+  border-color:#3B82F6;
+  background:rgba(29,78,216,.2);
+  box-shadow:0 0 20px rgba(59,130,246,.2);}
+.orient-btn svg{opacity:.7;transition:opacity .18s;}
+.orient-btn.selected svg{opacity:1;}
+.orient-lbl{
+  font-size:.6rem;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:rgba(255,255,255,.5);
+  transition:color .18s;}
+.orient-btn.selected .orient-lbl{color:#93C5FD;}
+.orient-hint{
+  font-size:.62rem;color:rgba(255,255,255,.3);
+  text-align:center;max-width:200px;line-height:1.5;}
+
 /* ── ANIMATIONS ── */
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:.15;}}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
@@ -1255,7 +1288,6 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
 <div id="cam-container">
   <div id="cam-off">
     <div class="cam-icon-wrap">
-      <!-- Custom camera SVG icon -->
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M23 19C23 19.5304 22.7893 20.0391 22.4142 20.4142C22.0391 20.7893 21.5304 21 21 21H3C2.46957 21 1.96086 20.7893 1.58579 20.4142C1.21071 20.0391 1 19.5304 1 19V8C1 7.46957 1.21071 6.96086 1.58579 6.58579C1.96086 6.21071 2.46957 6 3 6H7L9 3H15L17 6H21C21.5304 6 22.0391 6.21071 22.4142 6.58579C22.7893 6.96086 23 7.46957 23 8V19Z" stroke="#3B82F6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="12" cy="13" r="4" stroke="#60A5FA" stroke-width="1.5"/>
@@ -1265,9 +1297,31 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
     <div style="font-family:'Space Grotesk',sans-serif;font-size:1.1rem;font-weight:700;letter-spacing:-.02em;color:#fff;">
       FORM<span style="color:#3B82F6;">ate</span>
     </div>
-    <div class="cam-tagline">Point camera at your full body — step back 2–3m so MoveNet can track your skeleton</div>
+
+    <!-- Orientation picker -->
+    <div id="orient-picker">
+      <!-- Portrait -->
+      <div class="orient-btn selected" id="btn-portrait" onclick="setOrientation('portrait')">
+        <svg width="28" height="38" viewBox="0 0 28 38" fill="none">
+          <rect x="1" y="1" width="26" height="36" rx="4" stroke="white" stroke-width="2"/>
+          <rect x="5" y="5" width="18" height="26" rx="2" fill="rgba(59,130,246,.35)"/>
+          <line x1="9" y1="33" x2="19" y2="33" stroke="white" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="orient-lbl">Portrait</span>
+      </div>
+      <!-- Landscape -->
+      <div class="orient-btn" id="btn-landscape" onclick="setOrientation('landscape')">
+        <svg width="38" height="28" viewBox="0 0 38 28" fill="none">
+          <rect x="1" y="1" width="36" height="26" rx="4" stroke="white" stroke-width="2"/>
+          <rect x="5" y="5" width="26" height="18" rx="2" fill="rgba(59,130,246,.35)"/>
+          <line x1="33" y1="9" x2="33" y2="19" stroke="white" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="orient-lbl">Landscape</span>
+      </div>
+    </div>
+    <div class="orient-hint" id="orient-hint">Phone propped upright — see head to toe</div>
   </div>
-  <video id="video" autoplay playsinline muted style="display:none"></video>
+  <video id="video" autoplay playsinline muted></video>
   <canvas id="overlay"></canvas>
   <div id="hud-top">
     <div id="rep-block">
@@ -1782,30 +1836,23 @@ async function detect(){
   const video =document.getElementById("video");
   const canvas=document.getElementById("overlay");
   const ctx   =canvas.getContext("2d");
-  const vW=video.videoWidth||640, vH=video.videoHeight||480;
+  const vW=video.videoWidth||720, vH=video.videoHeight||1280;
 
-  // With object-fit:contain, video is letterboxed inside the container.
-  // Calculate the actual rendered rect so canvas coords match exactly.
+  // object-fit:cover — video fills container, edges cropped (not letterboxed)
+  // Canvas must match container size; keypoint coords scale with cover math
   const cW=canvas.offsetWidth, cH=canvas.offsetHeight;
-  const scale=Math.min(cW/vW, cH/vH);
+  // Cover scale = fill both dimensions, crop the overflow
+  const scale=Math.max(cW/vW, cH/vH);
   const rW=vW*scale, rH=vH*scale;
-  const offX=(cW-rW)/2, offY=(cH-rH)/2;
+  const offX=(cW-rW)/2, offY=(cH-rH)/2;  // negative = cropped amount
 
-  // Canvas internal resolution = container size (so CSS 100%/100% aligns)
   canvas.width=cW; canvas.height=cH;
   try{
-    const poses=await detector.estimatePoses(video,{flipHorizontal:false});
+    const mirror=(facingMode==="user");
+    const poses=await detector.estimatePoses(video,{flipHorizontal:mirror});
     ctx.clearRect(0,0,cW,cH);
-    // Draw video frame onto canvas first — this makes captureStream() record the composite
-    ctx.save();
-    if(facingMode==="user"){
-      // mirror the video draw to match CSS scaleX(-1)
-      ctx.translate(cW,0);ctx.scale(-1,1);
-      ctx.drawImage(video,cW-offX-rW,offY,rW,rH);
-    }else{
-      ctx.drawImage(video,offX,offY,rW,rH);
-    }
-    ctx.restore();
+    // Canvas overlay only — video element itself shows via CSS (object-fit:cover)
+    // No need to drawImage — skeleton draws on top of live video
     if(poses.length>0){
       const kp=poses[0].keypoints;
       const flags=checkThresholds(kp,vW,vH);
@@ -1829,6 +1876,22 @@ async function detect(){
         const lh=kp[MV.L_HIP],rh=kp[MV.R_HIP];
         if(lh&&rh&&lh.score>.3&&rh.score>.3)
           updateRep(kp, vW, vH);
+      }
+
+      // Record composite: draw video + skeleton onto an offscreen canvas
+      // for MediaRecorder (video element can't be captured directly cross-origin)
+      if(mediaRecorder && mediaRecorder.state==="recording"){
+        // Already recording canvas.captureStream — canvas has skeleton only,
+        // so also draw video frame into canvas each frame for the recording
+        ctx.save();
+        ctx.globalCompositeOperation="destination-over";
+        if(mirror){
+          ctx.translate(cW,0);ctx.scale(-1,1);
+          ctx.drawImage(video,cW-offX-rW,offY,rW,rH);
+        } else {
+          ctx.drawImage(video,offX,offY,rW,rH);
+        }
+        ctx.restore();
       }
 
       sessionFrames.push(canvas.toDataURL("image/jpeg",.7));
@@ -1862,26 +1925,40 @@ function toggleVoice(){
 }
 
 
+// ── Orientation ───────────────────────────────────────────────────
+let camOrientation = "portrait"; // "portrait" | "landscape"
+
+function setOrientation(o){
+  camOrientation = o;
+  document.getElementById("btn-portrait").className =
+    "orient-btn" + (o==="portrait" ? " selected" : "");
+  document.getElementById("btn-landscape").className =
+    "orient-btn" + (o==="landscape" ? " selected" : "");
+  document.getElementById("orient-hint").textContent =
+    o==="portrait"
+      ? "Phone propped upright — see head to toe"
+      : "Phone on its side — wider field of view";
+}
+
 async function getCameraStream(facing){
-  // Portrait-native resolution for front cam, landscape for back
-  const portrait = facing === "user";
+  const portrait = camOrientation === "portrait";
   const constraints = {
     audio: false,
     video: {
-      facingMode: facing,
+      facingMode: { ideal: facing },
       width:  { ideal: portrait ? 720  : 1280 },
       height: { ideal: portrait ? 1280 : 720  },
+      aspectRatio: { ideal: portrait ? 9/16 : 16/9 },
     }
   };
   const s = await navigator.mediaDevices.getUserMedia(constraints);
-  // Attempt to reset zoom to 1x after stream starts
   try {
     const track = s.getVideoTracks()[0];
     const caps  = track.getCapabilities();
     if(caps.zoom){
-      await track.applyConstraints({ advanced:[{ zoom: caps.zoom.min }] });
+      await track.applyConstraints({advanced:[{zoom:caps.zoom.min}]});
     }
-  } catch(e){ /* zoom not supported on this device */ }
+  } catch(e){}
   return s;
 }
 
@@ -1906,6 +1983,7 @@ async function toggleCamera(){
       stream=await getCameraStream(facingMode);
       const video=document.getElementById("video");
       video.srcObject=stream;
+      video.className=facingMode==="user"?"mirror":"";
       await new Promise(r=>video.onloadedmetadata=r);
       video.play();
       document.getElementById("cam-off").style.display="none";
@@ -1989,6 +2067,7 @@ async function flipCamera(){
   const video=document.getElementById("video");
   stream=await getCameraStream(facingMode);
   video.srcObject=stream;
+  video.className=facingMode==="user"?"mirror":"";
   await new Promise(r=>video.onloadedmetadata=r);
   video.play();
 }
