@@ -57,6 +57,33 @@ html,body,[class*="css"]{font-family:'Inter',sans-serif;background:var(--bg)!imp
 section[data-testid="stSidebar"]{display:none!important;}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:var(--bg);}::-webkit-scrollbar-thumb{background:var(--edge2);border-radius:4px;}
 
+
+/* ── WORKOUT LIBRARY ── */
+.prog-header{margin-bottom:1.5rem;}
+.prog-title{font-family:'Space Grotesk',sans-serif;font-size:1.6rem;font-weight:700;letter-spacing:-.02em;color:var(--txt);margin-bottom:.25rem;}
+.prog-sub{font-size:.8rem;color:var(--sub);line-height:1.6;}
+.day-strip{display:flex;gap:.5rem;margin-bottom:1.5rem;overflow-x:auto;padding-bottom:.25rem;}
+.day-chip{flex-shrink:0;padding:.45rem 1rem;border-radius:20px;font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;border:1.5px solid var(--edge2);background:var(--card);color:var(--sub);transition:all .15s;}
+.day-chip:hover{border-color:var(--p2);color:var(--p3);}
+.day-chip.active{background:linear-gradient(135deg,var(--p1),var(--v1));border-color:transparent;color:#fff;box-shadow:0 4px 14px rgba(29,78,216,.35);}
+.day-chip.rest{background:var(--card2);color:var(--muted);cursor:default;}
+.cat-label{font-size:.55rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--p2);margin:1.25rem 0 .75rem;}
+.ex-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:.85rem;margin-bottom:1.5rem;}
+.ex-card{background:var(--card);border:1px solid var(--edge);border-radius:16px;overflow:hidden;cursor:pointer;transition:all .18s;position:relative;}
+.ex-card:hover{border-color:var(--p2);transform:translateY(-2px);box-shadow:0 8px 24px rgba(29,78,216,.15);}
+.ex-card.supported{border-color:rgba(59,130,246,.3);}
+.ex-card.supported::after{content:'AI';position:absolute;top:.5rem;right:.5rem;font-size:.45rem;font-weight:800;letter-spacing:.1em;background:var(--p1);color:#fff;padding:.15rem .4rem;border-radius:6px;}
+.ex-pic{width:100%;height:110px;display:flex;align-items:center;justify-content:center;background:var(--card2);}
+.ex-pic svg{width:72px;height:72px;}
+.ex-info{padding:.6rem .75rem .75rem;}
+.ex-name{font-family:'Space Grotesk',sans-serif;font-size:.8rem;font-weight:700;color:var(--txt);margin-bottom:.2rem;}
+.ex-meta{font-size:.62rem;color:var(--sub);display:flex;gap:.4rem;flex-wrap:wrap;}
+.ex-tag{padding:.1rem .4rem;border-radius:6px;background:var(--card2);border:1px solid var(--edge2);}
+.day-focus{display:flex;align-items:center;gap:.75rem;padding:.85rem 1.1rem;border-radius:14px;background:var(--card2);border:1px solid var(--edge);margin-bottom:1.25rem;}
+.day-focus-icon{font-size:1.4rem;}
+.day-focus-text{font-size:.8rem;font-weight:600;color:var(--txt);}
+.day-focus-sub{font-size:.68rem;color:var(--sub);}
+
 /* NAV */
 .nav{display:flex;align-items:center;justify-content:space-between;padding:0 2rem;height:56px;background:rgba(7,7,15,.9);border-bottom:1px solid var(--edge);position:sticky;top:0;z-index:100;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);}
 .logo{font-family:'Space Grotesk',sans-serif;font-size:1.3rem;font-weight:700;letter-spacing:-.03em;display:flex;align-items:center;gap:.05rem;}
@@ -865,7 +892,7 @@ with ctrl_r:
     camera_view = st.selectbox("Camera", ["front_oblique", "side"])
 
 # ─── TABS ─────────────────────────────────────────────────────────
-tab_upload, tab_live = st.tabs(["Upload Video", "Live Trainer"])
+tab_upload, tab_live, tab_library = st.tabs(["Upload Video", "Live Trainer", "Workout Library"])
 
 
 # ════════════════════════════════════════════
@@ -1127,21 +1154,18 @@ html,body{width:100%;height:100%;overflow:hidden;
 /* Video uses contain — show full frame, no cropping */
 /* Front cam gets CSS mirror flip */
 video{
-  position:absolute;
-  pointer-events:none;
-  object-fit:cover;}
-/* .portrait-fix applied via JS when stream is landscape */
+  position:absolute;top:0;left:0;
+  width:100%;height:100%;
+  object-fit:cover;
+  pointer-events:none;}
+/* portrait-fix — dimensions set by JS, transform set here */
 video.portrait-fix{
-  width:100vh !important;
-  height:100vw !important;
-  top:50% !important; left:50% !important;
-  transform:translate(-50%,-50%) rotate(90deg);}
+  transform:translate(-50%,-50%) rotate(90deg);
+  object-fit:cover;}
 video.portrait-fix.mirror{
   transform:translate(-50%,-50%) rotate(90deg) scaleX(-1);}
-video.normal{
-  top:0;left:0;width:100%;height:100%;}
-video.normal.mirror{
-  transform:scaleX(-1);}
+video.normal{top:0;left:0;width:100%;height:100%;object-fit:cover;}
+video.normal.mirror{transform:scaleX(-1);}
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
 /* ── TOP HUD ── */
@@ -2034,12 +2058,33 @@ async function getCameraStream(facing){
 function applyVideoOrientation(video){
   const vW = video.videoWidth;
   const vH = video.videoHeight;
-  const needsRotate = vW > vH; // stream is landscape, phone is portrait
+  const needsRotate = vW > vH;
   const isMirror = facingMode === "user";
+  const container = document.getElementById("cam-container");
+  const cW = container.offsetWidth;
+  const cH = container.offsetHeight;
 
-  video.className = needsRotate
-    ? (isMirror ? "portrait-fix mirror" : "portrait-fix")
-    : (isMirror ? "normal mirror" : "normal");
+  if(needsRotate){
+    // Stream is landscape (e.g. 1280x720), phone is portrait.
+    // Rotate 90deg. After rotation the video's rendered w/h are swapped.
+    // To fill the portrait container: set video width=cH, height=cW
+    // so after rotate(90deg) it fills width=cW, height=cH correctly.
+    video.style.position = "absolute";
+    video.style.width    = cH + "px";
+    video.style.height   = cW + "px";
+    video.style.top      = "50%";
+    video.style.left     = "50%";
+    video.style.objectFit = "cover";
+    video.className = isMirror ? "portrait-fix mirror" : "portrait-fix";
+  } else {
+    video.style.position = "absolute";
+    video.style.width    = "100%";
+    video.style.height   = "100%";
+    video.style.top      = "0";
+    video.style.left     = "0";
+    video.style.objectFit = "cover";
+    video.className = isMirror ? "normal mirror" : "normal";
+  }
 }
 
 async function toggleCamera(){
@@ -2242,3 +2287,413 @@ function saveSession(){
             st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════
+# TAB 3 — WORKOUT LIBRARY
+# ════════════════════════════════════════════
+with tab_library:
+
+    # ── Workout data ─────────────────────────────────────────────
+    EXERCISES = {
+        # ── LOWER BODY ───────────────────────────────────────────
+        "Goblet Squat": {
+            "cat": "Lower Body", "muscles": ["Quads","Glutes","Core"],
+            "sets": "3×12", "tip": "Elbows inside knees. Chest tall.",
+            "supported": True,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- body deep squat -->
+              <circle cx="36" cy="10" r="6" fill="#3B82F6"/>
+              <line x1="36" y1="16" x2="36" y2="36" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms holding dumbbell -->
+              <line x1="36" y1="22" x2="26" y2="28" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="36" y1="22" x2="46" y2="28" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="22" y="26" width="28" height="5" rx="2.5" fill="#1D4ED8"/>
+              <rect x="20" y="25" width="5" height="7" rx="2" fill="#3B82F6"/>
+              <rect x="47" y="25" width="5" height="7" rx="2" fill="#3B82F6"/>
+              <!-- legs in squat -->
+              <line x1="36" y1="36" x2="22" y2="50" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="36" y1="36" x2="50" y2="50" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="22" y1="50" x2="18" y2="64" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="50" y1="50" x2="54" y2="64" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        "Romanian Deadlift": {
+            "cat": "Lower Body", "muscles": ["Hamstrings","Glutes","Lower Back"],
+            "sets": "3×10", "tip": "Hinge at hips. Soft knee. Bar close.",
+            "supported": True,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="36" cy="10" r="6" fill="#3B82F6"/>
+              <!-- hinge torso -->
+              <line x1="36" y1="16" x2="20" y2="38" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms down holding bar -->
+              <line x1="28" y1="27" x2="22" y2="46" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="28" y1="27" x2="34" y2="46" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="16" y="44" width="28" height="4" rx="2" fill="#1D4ED8"/>
+              <circle cx="14" cy="46" r="5" fill="none" stroke="#3B82F6" stroke-width="2"/>
+              <circle cx="46" cy="46" r="5" fill="none" stroke="#3B82F6" stroke-width="2"/>
+              <!-- legs standing -->
+              <line x1="20" y1="38" x2="18" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="20" y1="38" x2="30" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        "Bulgarian Split Squat": {
+            "cat": "Lower Body", "muscles": ["Quads","Glutes","Balance"],
+            "sets": "3×10 each", "tip": "Rear foot elevated. Front shin vertical.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="28" cy="10" r="6" fill="#3B82F6"/>
+              <line x1="28" y1="16" x2="28" y2="36" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms holding dumbbells -->
+              <line x1="28" y1="24" x2="18" y2="30" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="28" y1="24" x2="38" y2="30" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="13" y="28" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="33" y="28" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <!-- front leg in lunge -->
+              <line x1="28" y1="36" x2="18" y2="52" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="18" y1="52" x2="16" y2="64" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- rear leg elevated -->
+              <line x1="28" y1="36" x2="42" y2="44" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="42" y1="44" x2="52" y2="38" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- bench -->
+              <rect x="48" y="38" width="18" height="4" rx="2" fill="#1A1A30"/>
+              <rect x="50" y="42" width="3" height="8" rx="1" fill="#1A1A30"/>
+              <rect x="61" y="42" width="3" height="8" rx="1" fill="#1A1A30"/>
+            </svg>"""
+        },
+        "Sumo Squat": {
+            "cat": "Lower Body", "muscles": ["Inner Thighs","Glutes","Quads"],
+            "sets": "3×15", "tip": "Wide stance. Toes out 45°. Knees track toes.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="36" cy="9" r="6" fill="#3B82F6"/>
+              <line x1="36" y1="15" x2="36" y2="34" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- dumbbell between legs -->
+              <line x1="36" y1="28" x2="36" y2="44" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="30" y="42" width="12" height="5" rx="2.5" fill="#1D4ED8"/>
+              <rect x="27" y="41" width="5" height="7" rx="2" fill="#3B82F6"/>
+              <rect x="40" y="41" width="5" height="7" rx="2" fill="#3B82F6"/>
+              <!-- wide squat legs -->
+              <line x1="36" y1="34" x2="16" y2="52" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="36" y1="34" x2="56" y2="52" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="16" y1="52" x2="12" y2="64" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="56" y1="52" x2="60" y2="64" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        # ── PUSH ─────────────────────────────────────────────────
+        "Shoulder Press": {
+            "cat": "Push", "muscles": ["Shoulders","Triceps","Upper Chest"],
+            "sets": "3×12", "tip": "Core tight. Don't flare ribs. Full lockout.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="36" cy="10" r="6" fill="#3B82F6"/>
+              <line x1="36" y1="16" x2="36" y2="44" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms pressed up -->
+              <line x1="36" y1="22" x2="16" y2="14" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="36" y1="22" x2="56" y2="14" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="8" y="10" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="5" y="9" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="17" y="9" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="54" y="10" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="51" y="9" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="63" y="9" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <!-- legs -->
+              <line x1="36" y1="44" x2="28" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="36" y1="44" x2="44" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        "Floor Press": {
+            "cat": "Push", "muscles": ["Chest","Triceps","Shoulders"],
+            "sets": "3×12", "tip": "Elbows 45° from torso. Full extension.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- floor line -->
+              <line x1="4" y1="58" x2="68" y2="58" stroke="#1A1A30" stroke-width="2"/>
+              <!-- lying body -->
+              <circle cx="14" cy="44" r="6" fill="#3B82F6"/>
+              <line x1="20" y1="44" x2="58" y2="44" stroke="#60A5FA" stroke-width="3" stroke-linecap="round"/>
+              <!-- arms pressing up -->
+              <line x1="30" y1="44" x2="24" y2="28" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="44" y1="44" x2="50" y2="28" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="20" y="25" width="32" height="5" rx="2.5" fill="#1D4ED8"/>
+              <rect x="15" y="24" width="7" height="7" rx="3" fill="#3B82F6"/>
+              <rect x="50" y="24" width="7" height="7" rx="3" fill="#3B82F6"/>
+              <!-- legs flat -->
+              <line x1="58" y1="44" x2="64" y2="56" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="58" y1="44" x2="58" y2="56" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        "Lateral Raise": {
+            "cat": "Push", "muscles": ["Side Delts","Traps"],
+            "sets": "3×15", "tip": "Slight bend in elbow. Lead with elbows, not wrists.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="36" cy="10" r="6" fill="#3B82F6"/>
+              <line x1="36" y1="16" x2="36" y2="44" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms out to sides -->
+              <line x1="36" y1="22" x2="10" y2="30" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="36" y1="22" x2="62" y2="30" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="4" y="27" width="8" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="1" y="26" width="4" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="11" y="26" width="4" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="60" y="27" width="8" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="57" y="26" width="4" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="67" y="26" width="4" height="6" rx="2" fill="#3B82F6"/>
+              <line x1="36" y1="44" x2="28" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="36" y1="44" x2="44" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        # ── PULL ─────────────────────────────────────────────────
+        "Bent-Over Row": {
+            "cat": "Pull", "muscles": ["Lats","Rhomboids","Biceps"],
+            "sets": "3×10", "tip": "Flat back. Pull elbows past torso. Squeeze.",
+            "supported": True,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="48" cy="10" r="6" fill="#3B82F6"/>
+              <!-- hinged torso -->
+              <line x1="48" y1="16" x2="20" y2="36" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms rowing up -->
+              <line x1="34" y1="26" x2="28" y2="18" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="34" y1="26" x2="40" y2="18" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="24" y="15" width="20" height="5" rx="2.5" fill="#1D4ED8"/>
+              <rect x="20" y="14" width="6" height="7" rx="3" fill="#3B82F6"/>
+              <rect x="42" y="14" width="6" height="7" rx="3" fill="#3B82F6"/>
+              <!-- legs standing -->
+              <line x1="20" y1="36" x2="16" y2="60" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="20" y1="36" x2="28" y2="60" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        "Bicep Curl": {
+            "cat": "Pull", "muscles": ["Biceps","Forearms"],
+            "sets": "3×12", "tip": "Elbows pinned. Full extension at bottom.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="36" cy="10" r="6" fill="#3B82F6"/>
+              <line x1="36" y1="16" x2="36" y2="42" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- one arm curled up -->
+              <line x1="36" y1="26" x2="20" y2="30" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="20" y1="30" x2="16" y2="18" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="10" y="14" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="7" y="13" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="19" y="13" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <!-- other arm down -->
+              <line x1="36" y1="26" x2="52" y2="30" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="52" y1="30" x2="54" y2="46" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="50" y="44" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="47" y="43" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="59" y="43" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <line x1="36" y1="42" x2="28" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="36" y1="42" x2="44" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        "Single-Arm Row": {
+            "cat": "Pull", "muscles": ["Lats","Rear Delt","Biceps"],
+            "sets": "3×12 each", "tip": "Brace on knee. Elbow close to body.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- bench -->
+              <rect x="38" y="36" width="28" height="6" rx="3" fill="#0C0C18" stroke="#1A1A30" stroke-width="1.5"/>
+              <rect x="40" y="42" width="4" height="10" rx="2" fill="#0C0C18" stroke="#1A1A30" stroke-width="1"/>
+              <rect x="60" y="42" width="4" height="10" rx="2" fill="#0C0C18" stroke="#1A1A30" stroke-width="1"/>
+              <!-- body -->
+              <circle cx="22" cy="22" r="6" fill="#3B82F6"/>
+              <line x1="22" y1="28" x2="22" y2="46" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- support arm on bench -->
+              <line x1="22" y1="34" x2="40" y2="38" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <!-- rowing arm -->
+              <line x1="22" y1="34" x2="14" y2="40" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="14" y1="40" x2="12" y2="28" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="6" y="24" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="3" y="23" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="15" y="23" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <!-- legs -->
+              <line x1="22" y1="46" x2="14" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="22" y1="46" x2="32" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        # ── CORE ─────────────────────────────────────────────────
+        "Russian Twist": {
+            "cat": "Core", "muscles": ["Obliques","Abs","Hip Flexors"],
+            "sets": "3×20", "tip": "Lean back 45°. Rotate shoulder-to-shoulder.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- floor -->
+              <line x1="4" y1="62" x2="68" y2="62" stroke="#1A1A30" stroke-width="2"/>
+              <!-- seated V position -->
+              <circle cx="36" cy="26" r="6" fill="#3B82F6"/>
+              <line x1="36" y1="32" x2="36" y2="50" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="36" y1="50" x2="20" y2="60" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="36" y1="50" x2="52" y2="60" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms holding dumbbell, rotated to side -->
+              <line x1="36" y1="38" x2="52" y2="32" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="52" y="29" width="12" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="49" y="28" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="63" y="28" width="5" height="6" rx="2" fill="#3B82F6"/>
+            </svg>"""
+        },
+        "Renegade Row": {
+            "cat": "Core", "muscles": ["Core","Lats","Shoulders"],
+            "sets": "3×8 each", "tip": "Plank position. No hip rotation.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- floor -->
+              <line x1="4" y1="62" x2="68" y2="62" stroke="#1A1A30" stroke-width="2"/>
+              <!-- plank body -->
+              <circle cx="58" cy="28" r="6" fill="#3B82F6"/>
+              <line x1="52" y1="30" x2="18" y2="46" stroke="#60A5FA" stroke-width="3" stroke-linecap="round"/>
+              <!-- support arm -->
+              <line x1="40" y1="38" x2="34" y2="56" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="28" y="54" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <!-- rowing arm up -->
+              <line x1="26" y1="42" x2="22" y2="30" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="16" y="26" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="13" y="25" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <!-- feet -->
+              <line x1="18" y1="46" x2="10" y2="58" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="18" y1="46" x2="22" y2="58" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        # ── FULL BODY ────────────────────────────────────────────
+        "Dumbbell Deadlift": {
+            "cat": "Full Body", "muscles": ["Hamstrings","Glutes","Back","Traps"],
+            "sets": "4×8", "tip": "Neutral spine throughout. Drive through heels.",
+            "supported": True,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="36" cy="10" r="6" fill="#3B82F6"/>
+              <line x1="36" y1="16" x2="36" y2="40" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms hanging with dumbbells -->
+              <line x1="36" y1="24" x2="20" y2="32" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="20" y1="32" x2="18" y2="48" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="12" y="46" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="9" y="45" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="21" y="45" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <line x1="36" y1="24" x2="52" y2="32" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="52" y1="32" x2="54" y2="48" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="50" y="46" width="10" height="4" rx="2" fill="#1D4ED8"/>
+              <rect x="47" y="45" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <rect x="59" y="45" width="5" height="6" rx="2" fill="#3B82F6"/>
+              <line x1="36" y1="40" x2="26" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="36" y1="40" x2="46" y2="62" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+        "Dumbbell Swing": {
+            "cat": "Full Body", "muscles": ["Glutes","Hamstrings","Core","Shoulders"],
+            "sets": "3×15", "tip": "Hip hinge drive, not squat. Hike then explode.",
+            "supported": False,
+            "svg": """<svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="36" cy="10" r="6" fill="#3B82F6"/>
+              <!-- torso hinged -->
+              <line x1="36" y1="16" x2="20" y2="34" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- arms swinging forward with dumbbell -->
+              <line x1="28" y1="25" x2="36" y2="8" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <line x1="36" y1="8" x2="44" y2="25" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+              <rect x="30" y="4" width="12" height="5" rx="2.5" fill="#1D4ED8"/>
+              <rect x="27" y="3" width="5" height="7" rx="2" fill="#3B82F6"/>
+              <rect x="40" y="3" width="5" height="7" rx="2" fill="#3B82F6"/>
+              <line x1="20" y1="34" x2="14" y2="60" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="20" y1="34" x2="30" y2="60" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>"""
+        },
+    }
+
+    # ── Weekly program ────────────────────────────────────────────
+    PROGRAM = [
+        {"day": "Mon", "label": "Day 1", "focus": "Lower Body Power", "icon": "🦵",
+         "desc": "Quad & glute dominant. 3–4 sets, moderate weight.",
+         "exercises": ["Goblet Squat","Romanian Deadlift","Sumo Squat","Bulgarian Split Squat"]},
+        {"day": "Tue", "label": "Day 2", "focus": "Push", "icon": "💪",
+         "desc": "Chest, shoulders, triceps. Control the descent.",
+         "exercises": ["Shoulder Press","Floor Press","Lateral Raise"]},
+        {"day": "Wed", "label": "Rest", "focus": "Rest & Recovery", "icon": "😴",
+         "desc": "Active recovery — walk, stretch, foam roll.",
+         "exercises": [], "rest": True},
+        {"day": "Thu", "label": "Day 3", "focus": "Pull", "icon": "🏋️",
+         "desc": "Back, biceps, rear delts. Focus on the squeeze.",
+         "exercises": ["Bent-Over Row","Single-Arm Row","Bicep Curl"]},
+        {"day": "Fri", "label": "Day 4", "focus": "Full Body", "icon": "🔥",
+         "desc": "Compound movements. High effort, full range.",
+         "exercises": ["Dumbbell Deadlift","Dumbbell Swing","Renegade Row","Russian Twist"]},
+        {"day": "Sat", "label": "Day 5", "focus": "Active Rest", "icon": "🧘",
+         "desc": "Yoga, light walk, mobility work.",
+         "exercises": [], "rest": True},
+        {"day": "Sun", "label": "Rest", "focus": "Full Rest", "icon": "💤",
+         "desc": "Sleep, eat, recover.",
+         "exercises": [], "rest": True},
+    ]
+
+    # ── UI ────────────────────────────────────────────────────────
+    from datetime import datetime
+    today_idx = datetime.now().weekday()  # Mon=0 … Sun=6
+
+    st.markdown("""
+    <div class="prog-header">
+      <div class="prog-title">🏠 Home Dumbbell Program</div>
+      <div class="prog-sub">7-day structured plan · All you need is a pair of dumbbells · <span style="color:#3B82F6">AI badge</span> = FORMate can analyse this exercise</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Day strip
+    day_chips = ""
+    for i, d in enumerate(PROGRAM):
+        active = "active" if i == today_idx else ""
+        rest_cls = " rest" if d.get("rest") else ""
+        day_chips += f'<div class="day-chip {active}{rest_cls}">{d["day"]}<br><span style="font-size:.5rem;opacity:.6">{d["label"]}</span></div>'
+    st.markdown(f'<div class="day-strip">{day_chips}</div>', unsafe_allow_html=True)
+
+    # Today's session
+    today = PROGRAM[today_idx]
+    rest_color = "#30304A" if today.get("rest") else "#1D4ED8"
+    st.markdown(f"""
+    <div class="day-focus">
+      <div class="day-focus-icon">{today["icon"]}</div>
+      <div>
+        <div class="day-focus-text">Today — {today["focus"]}</div>
+        <div class="day-focus-sub">{today["desc"]}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if today.get("rest"):
+        st.markdown('<p style="color:var(--sub);font-size:.85rem;padding:1rem 0">Rest day — no workout scheduled. Focus on recovery.</p>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="cat-label">Today\'s Exercises — {today["focus"]}</div>', unsafe_allow_html=True)
+        cols = st.columns(min(len(today["exercises"]), 4))
+        for i, ex_name in enumerate(today["exercises"]):
+            ex = EXERCISES[ex_name]
+            sup = " supported" if ex["supported"] else ""
+            tags = "".join(f'<span class="ex-tag">{m}</span>' for m in ex["muscles"][:2])
+            with cols[i % len(cols)]:
+                st.markdown(f"""
+                <div class="ex-card{sup}">
+                  <div class="ex-pic">{ex["svg"]}</div>
+                  <div class="ex-info">
+                    <div class="ex-name">{ex_name}</div>
+                    <div class="ex-meta">{tags}</div>
+                    <div style="font-size:.6rem;color:var(--p3);margin-top:.3rem">{ex["sets"]}</div>
+                    <div style="font-size:.58rem;color:var(--sub);margin-top:.2rem;line-height:1.4">{ex["tip"]}</div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+
+    # Full library by category
+    st.markdown('<div class="cat-label" style="margin-top:2rem">Full Exercise Library</div>', unsafe_allow_html=True)
+    cats = {}
+    for name, ex in EXERCISES.items():
+        cats.setdefault(ex["cat"], []).append((name, ex))
+
+    for cat, exercises in cats.items():
+        st.markdown(f'<div class="cat-label">{cat}</div>', unsafe_allow_html=True)
+        cols = st.columns(min(len(exercises), 4))
+        for i, (ex_name, ex) in enumerate(exercises):
+            sup = " supported" if ex["supported"] else ""
+            tags = "".join(f'<span class="ex-tag">{m}</span>' for m in ex["muscles"][:2])
+            with cols[i % len(cols)]:
+                st.markdown(f"""
+                <div class="ex-card{sup}">
+                  <div class="ex-pic">{ex["svg"]}</div>
+                  <div class="ex-info">
+                    <div class="ex-name">{ex_name}</div>
+                    <div class="ex-meta">{tags}</div>
+                    <div style="font-size:.6rem;color:var(--p3);margin-top:.3rem">{ex["sets"]}</div>
+                    <div style="font-size:.58rem;color:var(--sub);margin-top:.2rem;line-height:1.4">{ex["tip"]}</div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
