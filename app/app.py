@@ -886,7 +886,13 @@ st.markdown('<div class="main">', unsafe_allow_html=True)
 ctrl_l, ctrl_r = st.columns([1, 1], gap="medium")
 with ctrl_l:
     st.markdown('<p class="lbl">Exercise</p>', unsafe_allow_html=True)
-    exercise = st.selectbox("Exercise", ["deadlift", "squat"])
+    exercise = st.selectbox("Exercise", [
+        "deadlift", "squat",
+        "romanian_deadlift", "goblet_squat", "sumo_squat", "bulgarian_split_squat",
+        "shoulder_press", "floor_press", "lateral_raise",
+        "bent_over_row", "bicep_curl", "single_arm_row",
+        "dumbbell_swing", "russian_twist", "renegade_row",
+    ], format_func=lambda x: x.replace("_"," ").title())
 with ctrl_r:
     st.markdown('<p class="lbl">Camera Angle</p>', unsafe_allow_html=True)
     camera_view = st.selectbox("Camera", ["front_oblique", "side"])
@@ -1494,52 +1500,208 @@ function checkThresholds(kp,W,H){
   const yn=i=>(kp[i]&&kp[i].score>.3)?kp[i].y/H:null;
   const ok=(...ids)=>ids.every(i=>xn(i)!==null);
   const f={};
-  if(EXERCISE==="deadlift"){
-    // Back angle: shoulder(5)-hip(11)-knee(13) — higher angle = straighter
+
+  // ── DEADLIFT ─────────────────────────────────────────────────
+  if(EXERCISE==="deadlift"||EXERCISE==="romanian_deadlift"||EXERCISE==="dumbbell_deadlift"){
+    // Back angle: shoulder(5)-hip(11)-knee(13)
     if(ok(5,11,13)){
       const a=angleDeg(xn(5),yn(5),xn(11),yn(11),xn(13),yn(13));
       f.back=a>=145?{st:"ok",lbl:"Back OK"}:a>=115?{st:"warn",lbl:"Back rounding"}:{st:"bad",lbl:"Back round!"};
     }
-    // Bar drift: horizontal distance shoulder vs hip (side view)
+    // Bar drift: shoulder vs hip horizontal distance (side view)
     if(ok(5,11)){
       const d=Math.abs(xn(5)-xn(11));
       f.drift=d<.08?{st:"ok",lbl:"Bar OK"}:d<.16?{st:"warn",lbl:"Bar drifting"}:{st:"bad",lbl:"Bar too far!"};
     }
-    // Hinge: knee Y should be clearly below hip Y (knee in front/lower)
+    // Hinge depth
     if(ok(11,13)){
-      const d=yn(13)-yn(11); // positive = knee lower than hip (good)
+      const d=yn(13)-yn(11);
       f.hinge=d>.04?{st:"ok",lbl:"Hinge OK"}:{st:"warn",lbl:"Hinge deeper"};
     }
-  }else{
-    // SQUAT
-    // Knee cave: left knee X should NOT be inside (greater than) left hip X
-    // Only fire during descent — check hip is below standing threshold
+
+  // ── SQUAT / GOBLET SQUAT / SUMO SQUAT ────────────────────────
+  }else if(EXERCISE==="squat"||EXERCISE==="goblet_squat"||EXERCISE==="sumo_squat"){
+    // Knee cave
     if(ok(11,12,13,14)){
-      // Use both sides — check if knees are collapsing inward
-      const hipW=Math.abs(xn(12)-xn(11));  // hip width
-      const kneeW=Math.abs(xn(14)-xn(13)); // knee width
-      // knees caving = knee width < hip width significantly
-      const ratio = hipW>0.01 ? kneeW/hipW : 1;
-      f.knee=ratio>=0.75?{st:"ok",lbl:"Knees OK"}:ratio>=0.55?{st:"warn",lbl:"Knee caving"}:{st:"bad",lbl:"Knee cave!"};
+      const hipW=Math.abs(xn(12)-xn(11));
+      const kneeW=Math.abs(xn(14)-xn(13));
+      const ratio=hipW>0.01?kneeW/hipW:1;
+      // Sumo squat naturally has wider stance — more lenient threshold
+      const warnT=EXERCISE==="sumo_squat"?0.6:0.75;
+      const badT =EXERCISE==="sumo_squat"?0.4:0.55;
+      f.knee=ratio>=warnT?{st:"ok",lbl:"Knees OK"}:ratio>=badT?{st:"warn",lbl:"Knee caving"}:{st:"bad",lbl:"Knee cave!"};
     }
-    // Squat depth: hip Y vs knee Y — in squat, hip drops toward knee level
-    // hip Y approaches knee Y from above (both increase downward)
-    // gap = knee Y - hip Y → smaller gap = deeper squat
+    // Squat depth
     if(ok(11,13)){
-      const gap=yn(13)-yn(11); // knee Y minus hip Y (both normalised 0-1)
-      // gap shrinks as you squat — parallel = gap ~0, standing = gap ~0.2+
+      const gap=yn(13)-yn(11);
       f.depth=gap<=.08?{st:"ok",lbl:"Good depth"}:gap<=.16?{st:"warn",lbl:"Go deeper"}:{st:"bad",lbl:"Too shallow"};
     }
-    // Forward lean: trunk angle from vertical
-    // use shoulder Y vs hip Y relative to their X offset
+    // Forward lean — more lenient for goblet (counterweight helps stay upright)
     if(ok(5,11)){
       const dx=Math.abs(xn(5)-xn(11));
       const dy=Math.abs(yn(5)-yn(11));
-      // lean angle = atan(dx/dy) — 0 = vertical, higher = leaning
       const lean=dy>0.01?dx/dy:0;
-      f.lean=lean<.25?{st:"ok",lbl:"Upright OK"}:lean<.45?{st:"warn",lbl:"Leaning fwd"}:{st:"bad",lbl:"Too much lean!"};
+      const warnT=EXERCISE==="goblet_squat"?0.35:0.25;
+      f.lean=lean<warnT?{st:"ok",lbl:"Chest up OK"}:lean<.5?{st:"warn",lbl:"Leaning fwd"}:{st:"bad",lbl:"Too much lean!"};
+    }
+
+  // ── BULGARIAN SPLIT SQUAT ────────────────────────────────────
+  }else if(EXERCISE==="bulgarian_split_squat"){
+    // Front shin angle (knee tracking over toes)
+    if(ok(13,15)){
+      const dx=Math.abs(xn(13)-xn(15));
+      const dy=Math.abs(yn(13)-yn(15));
+      const shin=dy>0.01?dx/dy:0;
+      f.shin=shin<.3?{st:"ok",lbl:"Shin OK"}:shin<.55?{st:"warn",lbl:"Knee too far fwd"}:{st:"bad",lbl:"Knee over toes!"};
+    }
+    // Torso upright
+    if(ok(5,11)){
+      const dx=Math.abs(xn(5)-xn(11));
+      const dy=Math.abs(yn(5)-yn(11));
+      const lean=dy>0.01?dx/dy:0;
+      f.torso=lean<.3?{st:"ok",lbl:"Upright OK"}:lean<.5?{st:"warn",lbl:"Leaning fwd"}:{st:"bad",lbl:"Stay upright!"};
+    }
+    // Hip drop (hip level)
+    if(ok(11,12)){
+      const hipDiff=Math.abs(yn(11)-yn(12));
+      f.hip=hipDiff<.06?{st:"ok",lbl:"Hips level"}:hipDiff<.12?{st:"warn",lbl:"Hip dropping"}:{st:"bad",lbl:"Level hips!"};
+    }
+
+  // ── SHOULDER PRESS ────────────────────────────────────────────
+  }else if(EXERCISE==="shoulder_press"){
+    // Elbow flare: wrists (15,16) should be above elbows (13,14) at lockout
+    if(ok(13,14,15,16)){
+      const lElbowAbove=yn(13)>yn(15); // elbow higher than wrist = bad
+      const rElbowAbove=yn(14)>yn(16);
+      f.lockout=(!lElbowAbove&&!rElbowAbove)?{st:"ok",lbl:"Full lockout"}:
+                (lElbowAbove||rElbowAbove)?{st:"warn",lbl:"Extend fully"}:{st:"bad",lbl:"No lockout!"};
+    }
+    // Rib flare / back arch: excessive lean back
+    if(ok(5,6,11,12)){
+      const shoulderMidX=(xn(5)+xn(6))/2;
+      const hipMidX=(xn(11)+xn(12))/2;
+      const lean=Math.abs(shoulderMidX-hipMidX);
+      f.arch=lean<.08?{st:"ok",lbl:"Core tight"}:lean<.15?{st:"warn",lbl:"Watch rib flare"}:{st:"bad",lbl:"Arching back!"};
+    }
+    // Symmetry: both elbows at similar height
+    if(ok(13,14)){
+      const diff=Math.abs(yn(13)-yn(14));
+      f.sym=diff<.06?{st:"ok",lbl:"Even press"}:{st:"warn",lbl:"Uneven press"};
+    }
+
+  // ── FLOOR PRESS ───────────────────────────────────────────────
+  }else if(EXERCISE==="floor_press"){
+    // Elbow angle at bottom (elbows should be ~45° from torso)
+    if(ok(5,7,9)){
+      const a=angleDeg(xn(5),yn(5),xn(7),yn(7),xn(9),yn(9));
+      f.elbow=a>=130?{st:"ok",lbl:"Elbow OK"}:a>=100?{st:"warn",lbl:"Open elbows more"}:{st:"bad",lbl:"Elbows too tight!"};
+    }
+    // Wrist over elbow at lockout
+    if(ok(7,9)){
+      const diff=Math.abs(xn(7)-xn(9));
+      f.lockout=diff<.06?{st:"ok",lbl:"Lockout OK"}:{st:"warn",lbl:"Full extension"};
+    }
+
+  // ── LATERAL RAISE ─────────────────────────────────────────────
+  }else if(EXERCISE==="lateral_raise"){
+    // Arms at shoulder height (wrist Y ~ shoulder Y at top)
+    if(ok(5,6,9,10)){
+      const shoulderY=(yn(5)+yn(6))/2;
+      const wristY=(yn(9)+yn(10))/2;
+      const diff=wristY-shoulderY; // negative = wrists above shoulders
+      f.height=diff<=.05?{st:"ok",lbl:"Good height"}:diff<=.15?{st:"warn",lbl:"Raise higher"}:{st:"bad",lbl:"Too low!"};
+    }
+    // Symmetry
+    if(ok(9,10)){
+      const diff=Math.abs(yn(9)-yn(10));
+      f.sym=diff<.06?{st:"ok",lbl:"Even raise"}:{st:"warn",lbl:"Uneven arms"};
+    }
+    // Elbow slight bend (elbow should not be fully straight = locked)
+    if(ok(5,7,9)){
+      const a=angleDeg(xn(5),yn(5),xn(7),yn(7),xn(9),yn(9));
+      f.bend=a<170?{st:"ok",lbl:"Soft elbow OK"}:{st:"warn",lbl:"Soften elbows"};
+    }
+
+  // ── BENT-OVER ROW ─────────────────────────────────────────────
+  }else if(EXERCISE==="bent_over_row"||EXERCISE==="single_arm_row"){
+    // Back flatness: shoulder-hip-knee angle
+    if(ok(5,11,13)){
+      const a=angleDeg(xn(5),yn(5),xn(11),yn(11),xn(13),yn(13));
+      f.back=a>=140?{st:"ok",lbl:"Flat back"}:a>=115?{st:"warn",lbl:"Back rounding"}:{st:"bad",lbl:"Back round!"};
+    }
+    // Row height: elbow should travel above torso at top
+    if(ok(5,7)){
+      const elbowAboveShoulder=yn(7)<yn(5);
+      f.row=elbowAboveShoulder?{st:"ok",lbl:"Full row"}:{st:"warn",lbl:"Pull higher"};
+    }
+    // Hip hinge depth (torso should be ~parallel to floor)
+    if(ok(5,11)){
+      const dx=Math.abs(xn(5)-xn(11));
+      const dy=Math.abs(yn(5)-yn(11));
+      const angle=dy>0.01?dx/dy:0;
+      f.hinge=angle>.8?{st:"ok",lbl:"Good hinge"}:angle>.5?{st:"warn",lbl:"Hinge more"}:{st:"bad",lbl:"Hinge deeper!"};
+    }
+
+  // ── BICEP CURL ────────────────────────────────────────────────
+  }else if(EXERCISE==="bicep_curl"){
+    // Elbow flare: upper arm should stay close to torso
+    // Elbow X should be close to hip X (not flaring out)
+    if(ok(5,7,11)){
+      const elbowFlare=Math.abs(xn(7)-xn(11));
+      f.flare=elbowFlare<.12?{st:"ok",lbl:"Elbows pinned"}:elbowFlare<.2?{st:"warn",lbl:"Tuck elbows"}:{st:"bad",lbl:"Elbow flare!"};
+    }
+    // Full extension at bottom: arm angle should be near straight
+    if(ok(5,7,9)){
+      const a=angleDeg(xn(5),yn(5),xn(7),yn(7),xn(9),yn(9));
+      f.extend=a>=160?{st:"ok",lbl:"Full extension"}:a>=140?{st:"warn",lbl:"Lower fully"}:{st:"bad",lbl:"Extend fully!"};
+    }
+
+  // ── DUMBBELL SWING ────────────────────────────────────────────
+  }else if(EXERCISE==="dumbbell_swing"){
+    // Hip hinge dominance: hip angle
+    if(ok(5,11,13)){
+      const a=angleDeg(xn(5),yn(5),xn(11),yn(11),xn(13),yn(13));
+      f.hinge=a<=140?{st:"ok",lbl:"Hip hinge OK"}:a<=160?{st:"warn",lbl:"Hinge more"}:{st:"bad",lbl:"Not hinging!"};
+    }
+    // Spine neutral at bottom
+    if(ok(5,11)){
+      const dx=Math.abs(xn(5)-xn(11));
+      const dy=Math.abs(yn(5)-yn(11));
+      const lean=dy>0.01?dx/dy:0;
+      f.spine=lean<.5?{st:"ok",lbl:"Spine OK"}:{st:"warn",lbl:"Neutral spine"};
+    }
+
+  // ── RUSSIAN TWIST ─────────────────────────────────────────────
+  }else if(EXERCISE==="russian_twist"){
+    // Lean back angle (should be ~45°)
+    if(ok(5,11)){
+      const dx=Math.abs(xn(5)-xn(11));
+      const dy=Math.abs(yn(5)-yn(11));
+      const lean=dy>0.01?dx/dy:0;
+      f.lean=lean>.2&&lean<.7?{st:"ok",lbl:"Good lean"}:lean<=.2?{st:"warn",lbl:"Lean back more"}:{st:"bad",lbl:"Too far back!"};
+    }
+    // Rotation: shoulders should rotate (shoulder width projection changes)
+    if(ok(5,6)){
+      const shoulderW=Math.abs(xn(5)-xn(6));
+      f.rotation=shoulderW<.15?{st:"ok",lbl:"Rotating OK"}:{st:"warn",lbl:"Rotate more"};
+    }
+
+  // ── RENEGADE ROW ──────────────────────────────────────────────
+  }else if(EXERCISE==="renegade_row"){
+    // Hip rotation (must stay flat — hips shouldn't rotate during row)
+    if(ok(11,12)){
+      const hipDiff=Math.abs(yn(11)-yn(12));
+      f.hip=hipDiff<.05?{st:"ok",lbl:"Hips flat"}:hipDiff<.1?{st:"warn",lbl:"Control hips"}:{st:"bad",lbl:"Hips rotating!"};
+    }
+    // Plank position: shoulder-hip-ankle alignment
+    if(ok(5,11)){
+      const dx=Math.abs(xn(5)-xn(11));
+      const dy=Math.abs(yn(5)-yn(11));
+      const sag=dy>0.01?dx/dy:0;
+      f.plank=sag<.15?{st:"ok",lbl:"Plank solid"}:sag<.3?{st:"warn",lbl:"Hips sagging"}:{st:"bad",lbl:"Hips too low!"};
     }
   }
+
   return f;
 }
 
@@ -1634,17 +1796,52 @@ function speak(text, priority=false){
 }
 
 const VOICE_CUES={
-  "Knee cave!":   "Knees out",
-  "Knee caving":  "Watch your knees",
-  "Too shallow":  "Go deeper",
-  "Go deeper":    "Deeper",
-  "Too much lean!":"Stay upright",
-  "Leaning fwd":  "Chest up",
-  "Bar too far!": "Bar close to body",
-  "Bar drifting": "Keep bar close",
-  "Back round!":  "Neutral spine",
-  "Back rounding":"Brace your back",
-  "Hinge deeper": "Push hips back",
+  // Deadlift / RDL
+  "Knee cave!":      "Knees out",
+  "Knee caving":     "Watch your knees",
+  "Too shallow":     "Go deeper",
+  "Go deeper":       "Deeper",
+  "Too much lean!":  "Stay upright",
+  "Leaning fwd":     "Chest up",
+  "Bar too far!":    "Bar close to body",
+  "Bar drifting":    "Keep bar close",
+  "Back round!":     "Neutral spine",
+  "Back rounding":   "Brace your back",
+  "Hinge deeper":    "Push hips back",
+  "Hinge deeper!":   "Drive hips back",
+  // Shoulder press / floor press
+  "No lockout!":     "Lock it out",
+  "Extend fully":    "Full extension",
+  "Arching back!":   "Tighten your core",
+  "Watch rib flare": "Ribs down",
+  "Uneven press":    "Press evenly",
+  "Elbows too tight!":"Open your elbows",
+  // Lateral raise
+  "Too low!":        "Raise to shoulder height",
+  "Raise higher":    "Higher",
+  "Uneven arms":     "Even it out",
+  "Soften elbows":   "Soft bend in elbows",
+  // Row
+  "Pull higher":     "Elbow past your torso",
+  "Hinge more":      "Hinge at the hips",
+  "Hinge deeper!":   "Parallel to the floor",
+  // Bicep curl
+  "Elbow flare!":    "Pin your elbows",
+  "Tuck elbows":     "Keep elbows in",
+  "Extend fully!":   "Lower all the way down",
+  // Split squat
+  "Knee over toes!": "Shin vertical",
+  "Hip dropping":    "Level your hips",
+  "Level hips!":     "Square your hips",
+  // Swing
+  "Not hinging!":    "Hip hinge, not a squat",
+  // Renegade row
+  "Hips rotating!":  "Keep hips still",
+  "Hips sagging":    "Squeeze your core",
+  "Hips too low!":   "Raise your hips",
+  // Russian twist
+  "Lean back more":  "Lean back forty five degrees",
+  "Too far back!":   "Sit up slightly",
 };
 
 function speakFlags(flags){
