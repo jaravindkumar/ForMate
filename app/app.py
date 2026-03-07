@@ -5,7 +5,18 @@ import streamlit as st
 import pandas as pd
 import cv2
 
-ROOT = Path(__file__).resolve().parent
+# ROOT = directory containing the pipeline scripts
+# On Streamlit Cloud, app.py may be in a subdirectory (e.g. /mount/src/formate/app/)
+# while pipeline scripts sit in the repo root (/mount/src/formate/)
+def _find_root():
+    here = Path(__file__).resolve().parent
+    if (here / "pipeline_bronze_extract.py").exists():
+        return here
+    if (here.parent / "pipeline_bronze_extract.py").exists():
+        return here.parent
+    return here  # fallback — will show clear error
+
+ROOT = _find_root()
 PY   = sys.executable
 
 st.set_page_config(page_title="FORMate", layout="wide", page_icon="F", initial_sidebar_state="collapsed")
