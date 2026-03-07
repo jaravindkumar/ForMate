@@ -1127,15 +1127,21 @@ html,body{width:100%;height:100%;overflow:hidden;
 /* Video uses contain — show full frame, no cropping */
 /* Front cam gets CSS mirror flip */
 video{
-  position:absolute;top:50%;left:50%;
-  width:100%;height:100%;
-  transform:translate(-50%,-50%) scale(var(--vid-zoom,1));
-  transform-origin:center center;
-  object-fit:contain;
-  background:#000;
-  pointer-events:none;}
-video.mirror{ transform:translate(-50%,-50%) scale(var(--vid-zoom,1)) scaleX(-1); }
-#cam-container{ --vid-zoom:1; }
+  position:absolute;
+  pointer-events:none;
+  object-fit:cover;}
+/* .portrait-fix applied via JS when stream is landscape */
+video.portrait-fix{
+  width:100vh !important;
+  height:100vw !important;
+  top:50% !important; left:50% !important;
+  transform:translate(-50%,-50%) rotate(90deg);}
+video.portrait-fix.mirror{
+  transform:translate(-50%,-50%) rotate(90deg) scaleX(-1);}
+video.normal{
+  top:0;left:0;width:100%;height:100%;}
+video.normal.mirror{
+  transform:scaleX(-1);}
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
 /* ── TOP HUD ── */
@@ -1328,20 +1334,6 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   font-size:.62rem;color:rgba(255,255,255,.3);
   text-align:center;max-width:200px;line-height:1.5;}
 
-/* ── ZOOM SLIDER ── */
-#zoom-bar{
-  position:absolute;right:.7rem;top:50%;transform:translateY(-50%);
-  z-index:20;display:flex;flex-direction:column;align-items:center;gap:.4rem;}
-#zoom-track{
-  -webkit-appearance:none;appearance:none;
-  writing-mode:vertical-lr;direction:rtl;
-  width:4px;height:120px;
-  background:rgba(255,255,255,.15);border-radius:4px;cursor:pointer;outline:none;}
-#zoom-track::-webkit-slider-thumb{
-  -webkit-appearance:none;width:18px;height:18px;border-radius:50%;
-  background:#3B82F6;border:2px solid #fff;box-shadow:0 0 6px rgba(59,130,246,.6);}
-#zoom-lbl{font-size:.55rem;font-weight:700;color:rgba(255,255,255,.5);letter-spacing:.06em;}
-
 /* ── ANIMATIONS ── */
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:.15;}}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
@@ -1387,12 +1379,6 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   </div>
   <video id="video" autoplay playsinline muted></video>
   <canvas id="overlay"></canvas>
-  <!-- Zoom slider — drag up to zoom out -->
-  <div id="zoom-bar">
-    <span id="zoom-lbl">ZOOM</span>
-    <input id="zoom-track" type="range" min="0.3" max="1.5" step="0.05" value="1"
-           oninput="setZoom(this.value)">
-  </div>
   <div id="hud-top">
     <div id="rep-block">
       <div id="rep-num">0</div>
@@ -1916,18 +1902,16 @@ async function detect(){
   const video =document.getElementById("video");
   const canvas=document.getElementById("overlay");
   const ctx   =canvas.getContext("2d");
-  const rawW=video.videoWidth||720, rawH=video.videoHeight||1280;
-  // If stream is landscape but we rotated it to portrait, swap dims for keypoint math
-  const streamIsLandscape = rawW > rawH;
-  const vW = streamIsLandscape ? rawH : rawW;
-  const vH = streamIsLandscape ? rawW : rawH;
+  // Account for rotation: if landscape stream rotated to portrait, swap dims
+  const _vW=video.videoWidth||720, _vH=video.videoHeight||1280;
+  const _rotated = video.className.includes("portrait-fix");
+  const vW = _rotated ? _vH : _vW;
+  const vH = _rotated ? _vW : _vH;
 
-  // object-fit:contain — full frame visible, letterboxed
-  // Scale = fit within both dimensions, black bars fill the rest
   const cW=canvas.offsetWidth, cH=canvas.offsetHeight;
-  const scale=Math.min(cW/vW, cH/vH);
+  const scale=Math.max(cW/vW, cH/vH);
   const rW=vW*scale, rH=vH*scale;
-  const offX=(cW-rW)/2, offY=(cH-rH)/2;  // positive = letterbox bars
+  const offX=(cW-rW)/2, offY=(cH-rH)/2;
 
   canvas.width=cW; canvas.height=cH;
   try{
@@ -1935,12 +1919,7 @@ async function detect(){
     const poses=await detector.estimatePoses(video,{flipHorizontal:mirror});
     ctx.clearRect(0,0,cW,cH);
 
-    // Apply same zoom as CSS video transform so skeleton aligns
-    const z = currentZoom;
-    ctx.save();
-    ctx.translate(cW/2, cH/2);
-    ctx.scale(mirror ? -z : z, z);
-    ctx.translate(-cW/2, -cH/2);
+
 
     if(poses.length>0){
       const kp=poses[0].keypoints;
@@ -1988,8 +1967,6 @@ async function detect(){
       }
 
       sessionFrames.push(canvas.toDataURL("image/jpeg",.7));
-      ctx.restore(); // end zoom transform
-
     }else{
       // No pose detected
       if(!repActive && !countdownActive){
@@ -2026,14 +2003,6 @@ function toggleVoice(){
 }
 
 
-// ── Zoom ──────────────────────────────────────────────────────────
-let currentZoom = 1.0;
-function setZoom(val){
-  currentZoom = parseFloat(val);
-  document.getElementById("cam-container").style.setProperty("--vid-zoom", currentZoom);
-  document.getElementById("zoom-track").value = currentZoom;
-}
-
 // ── Orientation + Camera ─────────────────────────────────────────
 let camOrientation = "portrait";
 
@@ -2050,25 +2019,27 @@ function setOrientation(o){
 }
 
 async function getCameraStream(facing){
-  // Front camera always portrait regardless of orientation selection
-  const portrait = (camOrientation === "portrait") || (facing === "user");
+  // Just request the camera — don't fight the browser with size hints
   try {
-    // Try ideal resolution first
-    return await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: { ideal: facing },
-        width:  { ideal: portrait ? 720  : 1280 },
-        height: { ideal: portrait ? 1280 : 720  },
-      }
-    });
-  } catch(e) {
-    // Fallback — just request the camera with no size constraints
     return await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: { facingMode: { ideal: facing } }
     });
+  } catch(e) {
+    return await navigator.mediaDevices.getUserMedia({ audio:false, video:true });
   }
+}
+
+
+function applyVideoOrientation(video){
+  const vW = video.videoWidth;
+  const vH = video.videoHeight;
+  const needsRotate = vW > vH; // stream is landscape, phone is portrait
+  const isMirror = facingMode === "user";
+
+  video.className = needsRotate
+    ? (isMirror ? "portrait-fix mirror" : "portrait-fix")
+    : (isMirror ? "normal mirror" : "normal");
 }
 
 async function toggleCamera(){
@@ -2094,28 +2065,7 @@ async function toggleCamera(){
       video.srcObject=stream;
       await new Promise(r=>video.onloadedmetadata=r);
       video.play();
-
-      // ── Fix landscape stream on portrait phone ──────────────────
-      // Some front cameras deliver landscape (width>height) even when phone is portrait
-      // Rotate 90° with CSS transform to correct it
-      const vW=video.videoWidth, vH=video.videoHeight;
-      const isLandscapeStream = vW > vH;
-      const isMirror = facingMode==="user";
-      if(isLandscapeStream){
-        // Rotate to portrait and mirror if front cam
-        video.style.transform = isMirror
-          ? "translate(-50%,-50%) rotate(90deg) scaleX(-1)"
-          : "translate(-50%,-50%) rotate(-90deg)";
-        video.style.width  = vH+"px";
-        video.style.height = vW+"px";
-      } else {
-        video.style.transform = isMirror ? "translate(-50%,-50%) scaleX(-1)" : "translate(-50%,-50%)";
-        video.style.width  = "100%";
-        video.style.height = "100%";
-      }
-      video.className = ""; // clear old mirror class — handled in transform above
-      // Default zoom
-      setZoom(facingMode==="user" ? 0.7 : 1.0);
+      applyVideoOrientation(video);
       document.getElementById("cam-off").style.display="none";
       document.getElementById("fps-badge").style.display="block";
       document.getElementById("btn-flip").style.display="flex";
@@ -2200,22 +2150,7 @@ async function flipCamera(){
   video.srcObject=stream;
   await new Promise(r=>video.onloadedmetadata=r);
   video.play();
-  const vW=video.videoWidth, vH=video.videoHeight;
-  const isLandscapeStream = vW > vH;
-  const isMirror = facingMode==="user";
-  if(isLandscapeStream){
-    video.style.transform = isMirror
-      ? "translate(-50%,-50%) rotate(90deg) scaleX(-1)"
-      : "translate(-50%,-50%) rotate(-90deg)";
-    video.style.width  = vH+"px";
-    video.style.height = vW+"px";
-  } else {
-    video.style.transform = isMirror ? "translate(-50%,-50%) scaleX(-1)" : "translate(-50%,-50%)";
-    video.style.width  = "100%";
-    video.style.height = "100%";
-  }
-  video.className = "";
-  setZoom(facingMode==="user" ? 0.7 : 1.0);
+  applyVideoOrientation(video);
 }
 
 function saveSession(){
