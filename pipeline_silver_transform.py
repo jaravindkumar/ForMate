@@ -29,147 +29,95 @@ def safe_medfilt(x: np.ndarray, k: int = 5) -> np.ndarray:
     return s.rolling(k, center=True, min_periods=1).median().to_numpy()
 
 
-def segment_reps(df: pd.DataFrame, exercise: str) -> pd.DataFrame:
+def segment_deadlift_reps(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Unified rep segmenter using a state machine on smoothed hip Y signal.
-
-    MediaPipe Y coords: 0 = top of image, 1 = bottom.
-    - Deadlift: standing (hip Y LOW) -> hinge down (hip Y HIGH) -> lockout (hip Y LOW)
-                Signal rises at the start of a pull, falls at lockout.
-    - Squat:    standing (hip Y LOW) -> squat down (hip Y HIGH) -> stand up (hip Y LOW)
-                Same signal shape — hip drops, then rises back.
-
-    State machine per rep:
-      IDLE -> DESCENDING (hip drops > threshold from baseline)
-           -> AT_BOTTOM  (hip stopped dropping, near peak)
-           -> ASCENDING  (hip rising back up)
-           -> COMPLETE   (hip returned within threshold of baseline) -> new rep
-
-    This is far more robust than peak/trough detection because:
-    - It uses a dynamic baseline (rolling window of recent "standing" frames)
-    - Thresholds are adaptive (% of person's standing hip height)
-    - It ignores noise/wobble that doesn't reach the descent threshold
+    Deadlift rep = bottom -> lockout -> bottom
+    Segment using trough -> peak -> trough on a smoothed signal.
     """
     df = df.copy()
 
-    # ── Signal: mean hip Y, smoothed ──────────────────────────────
-    hip_y_raw = (df["l_hip_y"].ffill().bfill() +
-                 df["r_hip_y"].ffill().bfill()) / 2.0
+    mid_sh_y = (df["l_shoulder_y_n"] + df["r_shoulder_y_n"]) / 2.0
+    sig = (-mid_sh_y).rolling(11, center=True, min_periods=1).mean()
 
-    # Smooth with a longer window to remove MediaPipe jitter
-    sig = hip_y_raw.rolling(9, center=True, min_periods=1).mean().to_numpy()
-
-    n   = len(sig)
-    dt  = float(np.median(np.diff(df["t_sec"].to_numpy()))) if n > 5 else 1.0/30.0
+    values = sig.to_numpy()
+    dt = np.median(np.diff(df["t_sec"])) if len(df) > 5 else (1.0 / 30.0)
     fps = 1.0 / dt if dt > 0 else 30.0
 
-    # ── Adaptive thresholds ────────────────────────────────────────
-    # Standing baseline = median of lowest 30% of hip Y values
-    standing_y  = np.nanpercentile(sig, 25)   # hip high on screen = low Y
-    bottom_y    = np.nanpercentile(sig, 75)   # hip low on screen  = high Y
-    total_range = bottom_y - standing_y
+    min_sep_trough = int(1.0 * fps)
+    min_sep_peak = int(1.0 * fps)
 
-    if total_range < 0.03:
-        # Not enough movement detected — return empty
-        df["rep_id"]     = -1
-        df["phase"]      = "unknown"
-        df["seg_signal"] = sig
-        df["peak"]       = False
-        df["trough"]     = False
-        return df
+    peak_thr = np.nanpercentile(values, 80)
+    trough_thr = np.nanpercentile(values, 40)
 
-    # Descent threshold: hip must drop at least 35% of total range
-    descent_thr = standing_y + total_range * 0.35
-    # Bottom threshold: hip must reach at least 65% of total range
-    bottom_thr  = standing_y + total_range * 0.65
-    # Return threshold: hip must return within 30% of standing
-    return_thr  = standing_y + total_range * 0.30
-
-    # Min rep duration: 0.8 seconds
-    min_rep_frames = max(int(0.8 * fps), 8)
-
-    # ── State machine ──────────────────────────────────────────────
-    IDLE, DESCENDING, AT_BOTTOM, ASCENDING = 0, 1, 2, 3
-
-    state       = IDLE
-    rep_start   = 0
-    rep_peak_i  = 0
-    rep_counter = 0
-
-    rep_id  = np.full(n, -1, dtype=int)
-    phase   = np.array(["unknown"] * n, dtype=object)
-    peaks   = []
     troughs = []
-
-    for i in range(n):
-        v = sig[i]
+    last = -10**9
+    for i in range(2, len(values) - 2):
+        if i - last < min_sep_trough:
+            continue
+        v = values[i]
         if np.isnan(v):
             continue
+        if v < values[i - 1] and v < values[i + 1] and v < trough_thr:
+            troughs.append(i)
+            last = i
 
-        if state == IDLE:
-            # Wait for meaningful descent
-            if v > descent_thr:
-                state     = DESCENDING
-                rep_start = i
-                rep_peak_i = i
+    peaks = []
+    last = -10**9
+    for i in range(2, len(values) - 2):
+        if i - last < min_sep_peak:
+            continue
+        v = values[i]
+        if np.isnan(v):
+            continue
+        if v > values[i - 1] and v > values[i + 1] and v > peak_thr:
+            peaks.append(i)
+            last = i
 
-        elif state == DESCENDING:
-            if v > sig[rep_peak_i]: rep_peak_i = i  # track deepest point
+    rep_id = np.full(len(df), -1, dtype=int)
+    phase = np.array(["unknown"] * len(df), dtype=object)
 
-            if v >= bottom_thr:
-                # Reached sufficient depth
-                state = AT_BOTTOM
-                peaks.append(rep_peak_i)
+    if len(troughs) < 2:
+        df["rep_id"] = rep_id
+        df["phase"] = phase
+        df["seg_signal"] = sig
+        df["peak"] = False
+        df["trough"] = False
+        return df
 
-            elif v < return_thr and (i - rep_start) < min_rep_frames:
-                # Came back up too fast without reaching depth — false start
-                state = IDLE
+    rep_counter = 0
+    for k in range(len(troughs) - 1):
+        a, b = troughs[k], troughs[k + 1]
+        inner_peaks = [p for p in peaks if a < p < b]
+        if not inner_peaks:
+            continue
 
-        elif state == AT_BOTTOM:
-            if v > sig[rep_peak_i]: rep_peak_i = i
-            # Wait for ascent
-            if v < descent_thr:
-                state = ASCENDING
+        p = max(inner_peaks, key=lambda idx: values[idx])
+        rep_id[a:b + 1] = rep_counter
 
-        elif state == ASCENDING:
-            if v <= return_thr and (i - rep_start) >= min_rep_frames:
-                # Rep complete — assign labels
-                rep_end = i
-                troughs.append(rep_start)
-                troughs.append(rep_end)
+        t_a = float(df.iloc[a]["t_sec"])
+        t_setup_end = t_a + 0.2
 
-                for j in range(rep_start, rep_end + 1):
-                    rep_id[j] = rep_counter
-                    if j < rep_peak_i:
-                        phase[j] = "descent" if exercise == "squat" else "pull"
-                    else:
-                        phase[j] = "ascent"  if exercise == "squat" else "descent"
+        for idx in range(a, b + 1):
+            t = float(df.iloc[idx]["t_sec"])
+            if t <= t_setup_end:
+                phase[idx] = "setup"
+            elif idx <= p:
+                phase[idx] = "pull"
+            else:
+                phase[idx] = "descent"
 
-                rep_counter += 1
-                state = IDLE
-                # Brief cooldown
-                i_skip = min(i + int(0.3 * fps), n - 1)
-                rep_start = i_skip
+        rep_counter += 1
 
-            elif v > sig[rep_peak_i]:
-                # Still going deeper — back to at_bottom
-                rep_peak_i = i
-                state = AT_BOTTOM
-
-    df["rep_id"]     = rep_id
-    df["phase"]      = phase
+    df["rep_id"] = rep_id
+    df["phase"] = phase
     df["seg_signal"] = sig
 
-    df["peak"]   = False
+    df["peak"] = False
     df["trough"] = False
     if peaks:
-        valid_peaks = [p for p in peaks if 0 <= p < n]
-        if valid_peaks:
-            df.loc[df.index[valid_peaks], "peak"] = True
+        df.loc[df.index[peaks], "peak"] = True
     if troughs:
-        valid_troughs = [t for t in troughs if 0 <= t < n]
-        if valid_troughs:
-            df.loc[df.index[valid_troughs], "trough"] = True
+        df.loc[df.index[troughs], "trough"] = True
 
     return df
 
@@ -244,7 +192,15 @@ def run_silver(session_dir: str) -> dict:
     df["r_wrist_y_n"] = df["r_wrist_y"]
 
     # Segment reps
-    df = segment_reps(df, exercise)
+    if exercise == "deadlift":
+        df = segment_deadlift_reps(df)
+    else:
+        # placeholder for squat segmentation later
+        df["rep_id"] = -1
+        df["phase"] = "unknown"
+        df["seg_signal"] = 0.0
+        df["peak"] = False
+        df["trough"] = False
 
     # reps table
     reps = (
