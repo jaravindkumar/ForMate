@@ -1,25 +1,25 @@
-# Web server
+# ── Streamlit ──────────────────────────────────────────────────────────────────
+streamlit>=1.32.0
+plotly>=5.20.0
+
+# ── Web server (FastAPI alternative) ──────────────────────────────────────────
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 python-multipart>=0.0.9
 
-# Deep learning
+# ── Deep learning ──────────────────────────────────────────────────────────────
 torch>=2.2.0
 torchvision>=0.17.0
 
-# Face detection (used by DECA internally)
+# ── Face detection (used by DECA internally) ───────────────────────────────────
 face-alignment>=1.3.5
 
-# Image processing
+# ── Image processing ──────────────────────────────────────────────────────────
 Pillow>=10.2.0
 numpy>=1.26.0
 scikit-image>=0.22.0
 opencv-python-headless>=4.9.0
 
-# 3D / mesh utilities
-trimesh>=4.3.0
-PyOpenGL>=3.1.7
-
-# DECA / FLAME dependencies
+# ── DECA / FLAME dependencies ──────────────────────────────────────────────────
 chumpy>=0.70
 scipy>=1.12.0

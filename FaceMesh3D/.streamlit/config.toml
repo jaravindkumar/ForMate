@@ -1,0 +1,15 @@
+[theme]
+base            = "dark"
+primaryColor    = "#6c63ff"
+backgroundColor = "#0d0f14"
+secondaryBackgroundColor = "#141720"
+textColor       = "#e2e8f0"
+font            = "sans serif"
+
+[server]
+maxUploadSize   = 10     # MB — camera images are small
+enableCORS      = false
+headless        = true   # needed for cloud / headless servers
+
+[browser]
+gatherUsageStats = false

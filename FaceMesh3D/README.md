@@ -13,31 +13,30 @@ A web app that lets you take a selfie with your phone's front camera and convert
 
 ```
 FaceMesh3D/
+├── streamlit_app.py      # ★ Streamlit entry point (camera + Plotly 3D)
+├── .streamlit/
+│   └── config.toml       # Dark theme + server settings
 ├── app/
-│   ├── main.py           # FastAPI backend — receives image, runs DECA, serves files
+│   ├── main.py           # FastAPI backend (alternative to Streamlit)
 │   ├── deca_runner.py    # DECA wrapper (preprocessing + reconstruction)
-│   └── static/
-│       ├── index.html    # Single-page UI
-│       ├── style.css     # Dark-theme responsive styles
-│       └── app.js        # Camera API + fetch + Three.js OBJ viewer
+│   └── static/           # HTML/CSS/JS + Three.js viewer
 ├── scripts/
 │   └── setup_deca.sh     # One-time setup: clones DECA, downloads model
-├── outputs/              # Per-session reconstruction results (auto-created)
+├── packages.txt          # System deps for Streamlit Cloud
 ├── requirements.txt
 └── README.md
 ```
 
 ## Tech Stack
 
-| Layer            | Technology                        |
-|------------------|-----------------------------------|
-| Backend          | FastAPI + Uvicorn                 |
-| 3D Reconstruction| DECA (FLAME model)                |
-| Face Detection   | face-alignment (FAN detector)     |
-| Deep Learning    | PyTorch                           |
-| Frontend         | Vanilla HTML + CSS + JS           |
-| 3D Viewer        | Three.js (OBJLoader, OrbitControls) |
-| Camera           | WebRTC `getUserMedia` API         |
+| Layer            | Technology                          |
+|------------------|-------------------------------------|
+| UI               | **Streamlit** (camera, layout, tabs)|
+| 3D Viewer        | **Plotly** `go.Mesh3d` (interactive)|
+| 3D Reconstruction| **DECA** (FLAME model)              |
+| Face Detection   | face-alignment (FAN detector)       |
+| Deep Learning    | PyTorch                             |
+| Alt. Backend     | FastAPI + Three.js (also included)  |
 
 ## Setup
 
@@ -89,29 +88,50 @@ uv_face_mask.png
 
 ### Step 4 — Start the app
 
+**Streamlit (recommended):**
 ```bash
 cd FaceMesh3D
+streamlit run streamlit_app.py
+```
+Open **http://localhost:8501** in your browser.
+
+**FastAPI alternative:**
+```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# open http://localhost:8000
 ```
 
-Open **http://localhost:8000** in your browser.
+> **Mobile camera note:** Camera access requires HTTPS outside `localhost`. Use `ngrok` (see below) to test on your phone.
 
-> **Note:** Camera requires a secure context. On mobile, either use `localhost` or serve over HTTPS (e.g. via `ngrok`).
+## Streamlit Community Cloud
+
+> ⚠️ **Important:** DECA requires ~2–4 GB RAM + large model files (~1 GB) that cannot be stored in a GitHub repo. Streamlit Community Cloud's free tier (1 GB RAM) will **not** be enough.
+>
+> **Recommended alternatives:**
+> - Deploy on a cloud VM (AWS EC2, GCP, Hetzner) with ≥8 GB RAM
+> - Use [Streamlit on Hugging Face Spaces](https://huggingface.co/spaces) (GPU Spaces work well)
+> - Run locally and expose via ngrok
+
+### Hugging Face Spaces (GPU)
+1. Create a new Space → SDK: Streamlit → Hardware: GPU (T4 small)
+2. Add `DECA/` as a Git LFS tracked folder or download models at startup
+3. Set `HF_TOKEN` secret if downloading gated models
+4. Push — Spaces will run `streamlit run streamlit_app.py` automatically
 
 ## Usage
 
-1. Click **Start Camera** — your front camera opens
-2. Click **Take Selfie** — 3-second countdown, then capture
-3. Click **Build 3D Mesh** — DECA reconstructs your face (~10–30 s)
-4. Explore the **interactive 3D viewer** — drag to rotate, scroll to zoom
-5. Switch between **Shape / Detail / Textured** rendered views
-6. Click **Download OBJ** to save the mesh
+1. **Take selfie** — Streamlit's built-in camera widget opens your front cam
+2. Click **Build 3D Mesh** — DECA fits the FLAME model (~10–30 s on CPU)
+3. **Rotate/zoom** the interactive Plotly 3D mesh
+4. Switch between **Shape / Detail / Textured** rendered view tabs
+5. Click **Download OBJ** to save the mesh file
 
 ## Mobile Access via ngrok
 
 ```bash
 # Install ngrok (https://ngrok.com)
-ngrok http 8000
+streamlit run streamlit_app.py &
+ngrok http 8501
 # Open the https:// URL on your phone
 ```
 
