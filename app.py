@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import cv2
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 PY   = sys.executable
 
 st.set_page_config(page_title="FORMate", layout="wide", page_icon="F", initial_sidebar_state="collapsed")
@@ -736,24 +736,33 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
 
 
 def run_pipeline(tmp_video, exercise, camera_view):
-    """Run bronze/silver/gold pipeline on a video file. Returns (session_id, b_sum, g_sum, rep_df, num_reps)."""
+    """Run bronze/silver/gold pipeline on a video file."""
     prog = st.progress(0)
     stat = st.empty()
+
+    # Verify pipeline scripts exist
+    for script in ["pipeline_bronze_extract.py", "pipeline_silver_transform.py", "pipeline_gold_score.py"]:
+        if not (ROOT / script).exists():
+            st.error(f"Missing pipeline script: {script} (looked in {ROOT})")
+            return None
 
     stat.markdown('<p class="pstatus">Extracting pose data...</p>', unsafe_allow_html=True)
     prog.progress(8)
     t0 = time.time()
-    p  = run_cmd([PY, "pipeline_bronze_extract.py",
+    p  = run_cmd([PY, str(ROOT / "pipeline_bronze_extract.py"),
                   "--video", str(tmp_video),
                   "--exercise", exercise,
                   "--camera_view", camera_view,
-                  "--overlay"], cwd=ROOT)
+                  "--overlay"], cwd=str(ROOT))
     if p.returncode != 0:
         st.error("Pose extraction failed.")
-        with st.expander("Error details"): st.code(p.stderr or p.stdout)
+        with st.expander("Error details"): st.code((p.stderr or "") + "\n" + (p.stdout or ""))
         return None
 
     b_sess     = latest_session_dir(ROOT / "pipeline" / "bronze", after_ts=t0)
+    if b_sess is None:
+        st.error("Bronze pipeline ran but produced no output session directory.")
+        return None
     b_sum      = read_json(b_sess / "summary.json")
     session_id = b_sum["session_id"]
     session_dir= b_sum["outputs"]["session_dir"]
@@ -761,21 +770,21 @@ def run_pipeline(tmp_video, exercise, camera_view):
 
     stat.markdown('<p class="pstatus">Detecting reps...</p>', unsafe_allow_html=True)
     prog.progress(42)
-    p = run_cmd([PY, "pipeline_silver_transform.py", "--session_dir", session_dir], cwd=ROOT)
+    p = run_cmd([PY, str(ROOT / "pipeline_silver_transform.py"), "--session_dir", session_dir], cwd=str(ROOT))
     if p.returncode != 0:
         st.error("Rep detection failed.")
-        with st.expander("Error details"): st.code(p.stderr or p.stdout)
+        with st.expander("Error details"): st.code((p.stderr or "") + "\n" + (p.stdout or ""))
         return None
     s_sum    = read_json(ROOT / "pipeline" / "silver" / session_id / "summary.json")
-    num_reps = s_sum["num_reps_detected"]
+    num_reps = s_sum.get("num_reps_detected", 0)
     prog.progress(65)
 
     stat.markdown('<p class="pstatus">Scoring form...</p>', unsafe_allow_html=True)
     prog.progress(72)
-    p = run_cmd([PY, "pipeline_gold_score.py", "--session_id", session_id, "--exercise", exercise], cwd=ROOT)
+    p = run_cmd([PY, str(ROOT / "pipeline_gold_score.py"), "--session_id", session_id, "--exercise", exercise], cwd=str(ROOT))
     if p.returncode != 0:
         st.error("Scoring failed.")
-        with st.expander("Error details"): st.code(p.stderr or p.stdout)
+        with st.expander("Error details"): st.code((p.stderr or "") + "\n" + (p.stdout or ""))
         return None
 
     gold_dir = ROOT / "pipeline" / "gold" / session_id
@@ -1085,7 +1094,7 @@ video{
   width:100%;height:100%;
   object-fit:cover;
   pointer-events:none;}
-video.mirror{transform:scaleX(-1);}
+video.mirror{ transform:scaleX(-1); }
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
 /* ── TOP HUD ── */
@@ -1334,8 +1343,8 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   <div id="fps-badge" style="display:none">-- FPS</div>
   <div id="flags-wrap"></div>
 
-  <!-- Gesture-to-start overlay -->
-  <div id="gesture-overlay">
+  <!-- Gesture-to-start overlay — hidden until body detected -->
+  <div id="gesture-overlay" style="display:none">
     <div id="gesture-ring-wrap">
       <svg width="88" height="88" viewBox="0 0 88 88">
         <!-- track -->
@@ -1659,19 +1668,28 @@ function checkGesture(kp, vW, vH){
 function startCountdown(){
   if(countdownActive) return;
   countdownActive=true;
-  countdownVal=3;
-  speak("3");
-  drawGestureOverlay(countdownVal);
-  const tick=setInterval(()=>{
-    countdownVal--;
+  countdownVal=5;
+  // Clear flags during countdown
+  document.getElementById("flags-wrap").innerHTML="";
+  // Show countdown in overlay
+  const el=document.getElementById("gesture-overlay");
+  if(el){
+    el.style.display="flex";
+    document.getElementById("gesture-ring-wrap").style.display="none";
+    document.getElementById("gesture-sub").style.display="none";
+  }
+  function tick(){
     if(countdownVal>0){
+      document.getElementById("gesture-hint").textContent="Starting in";
+      document.getElementById("gesture-countdown").textContent=countdownVal;
       speak(String(countdownVal));
+      countdownVal--;
+      setTimeout(tick,1000);
     } else {
-      clearInterval(tick);
+      // GO
       countdownActive=false;
       repActive=true;
       gestureHoldCount=0;
-      // Reset rep counting state fresh
       repCount=0;hipHist=[];repState="IDLE";
       calibN=0;standY=null;botY=null;rangeHistory=[];peakY=0;
       document.getElementById("rep-num").textContent="0";
@@ -1679,26 +1697,27 @@ function startCountdown(){
       setStatus("active");
       speak("Go!");
       hideGestureOverlay();
+      // Restore ring wrap for next time
+      const rw=document.getElementById("gesture-ring-wrap");
+      const gs=document.getElementById("gesture-sub");
+      if(rw) rw.style.display="";
+      if(gs) gs.style.display="";
     }
-  },1000);
-}
-
-function drawGestureOverlay(countdown){
-  const el=document.getElementById("gesture-overlay");
-  if(!el) return;
-  el.style.display="flex";
-  document.getElementById("gesture-countdown").textContent=
-    countdown!=null ? countdown : "";
+  }
+  tick();
 }
 
 function updateGestureOverlay(holdCount, isReady){
+  // Only show overlay once user is detected and in gesture phase
+  // Don't show if repActive or countdownActive
+  if(repActive || countdownActive) return;
   const el=document.getElementById("gesture-overlay");
-  if(!el||repActive||countdownActive) return;
+  if(!el) return;
   el.style.display="flex";
   const pct=Math.min(holdCount/GESTURE_HOLD,1);
   const ring=document.getElementById("gesture-ring");
   if(ring){
-    const c=2*Math.PI*36; // circumference r=36
+    const c=2*Math.PI*36;
     ring.style.strokeDashoffset= c-(c*pct);
     ring.style.stroke = pct>=1?"#fff":"#3B82F6";
   }
@@ -1851,16 +1870,12 @@ async function detect(){
     const mirror=(facingMode==="user");
     const poses=await detector.estimatePoses(video,{flipHorizontal:mirror});
     ctx.clearRect(0,0,cW,cH);
-    // Canvas overlay only — video element itself shows via CSS (object-fit:cover)
-    // No need to drawImage — skeleton draws on top of live video
+
     if(poses.length>0){
       const kp=poses[0].keypoints;
-      const flags=checkThresholds(kp,vW,vH);
-      drawSkeleton(ctx,kp,flags,vW,vH,rW,rH,offX,offY);
-      updateFlags(flags);
 
       if(!repActive && !countdownActive){
-        // ── Gesture detection phase ─────────────────────────────
+        // ── GESTURE PHASE: detect raise-hands, no skeleton yet ────
         const ready=checkGesture(kp,vW,vH);
         if(ready){
           gestureHoldCount++;
@@ -1871,18 +1886,25 @@ async function detect(){
           gestureHoldCount=0;
         }
         updateGestureOverlay(gestureHoldCount, ready);
+        // No skeleton, no flags during gesture phase
+
+      } else if(countdownActive){
+        // ── COUNTDOWN PHASE: show skeleton, no flags, overlay shows countdown
+        drawSkeleton(ctx,kp,{},vW,vH,rW,rH,offX,offY);
+
       } else if(repActive){
-        // ── Rep counting phase ──────────────────────────────────
+        // ── ACTIVE PHASE: full skeleton + flags + rep counting ────
+        hideGestureOverlay();
+        const flags=checkThresholds(kp,vW,vH);
+        drawSkeleton(ctx,kp,flags,vW,vH,rW,rH,offX,offY);
+        updateFlags(flags);
         const lh=kp[MV.L_HIP],rh=kp[MV.R_HIP];
         if(lh&&rh&&lh.score>.3&&rh.score>.3)
           updateRep(kp, vW, vH);
       }
 
-      // Record composite: draw video + skeleton onto an offscreen canvas
-      // for MediaRecorder (video element can't be captured directly cross-origin)
+      // Recording composite: video frame behind skeleton
       if(mediaRecorder && mediaRecorder.state==="recording"){
-        // Already recording canvas.captureStream — canvas has skeleton only,
-        // so also draw video frame into canvas each frame for the recording
         ctx.save();
         ctx.globalCompositeOperation="destination-over";
         if(mirror){
@@ -1895,12 +1917,19 @@ async function detect(){
       }
 
       sessionFrames.push(canvas.toDataURL("image/jpeg",.7));
+
     }else{
-      ctx.font="bold 14px Arial";ctx.fillStyle="rgba(255,255,255,.35)";
-      ctx.textAlign="center";
-      ctx.fillText("Point camera at full body",cW/2,cH-20);
-      ctx.textAlign="left";
-      if(!repActive && !countdownActive) updateGestureOverlay(0,false);
+      // No pose detected
+      if(!repActive && !countdownActive){
+        // Hide gesture overlay when body not in frame
+        hideGestureOverlay();
+        // Simple hint text
+        ctx.font="bold 13px Inter,system-ui";
+        ctx.fillStyle="rgba(255,255,255,.4)";
+        ctx.textAlign="center";
+        ctx.fillText("Point camera at your full body",cW/2,cH/2);
+        ctx.textAlign="left";
+      }
     }
   }catch(e){console.warn("detect:",e);}
   fpsN++;const now=performance.now();
@@ -1925,8 +1954,8 @@ function toggleVoice(){
 }
 
 
-// ── Orientation ───────────────────────────────────────────────────
-let camOrientation = "portrait"; // "portrait" | "landscape"
+// ── Orientation + Camera ─────────────────────────────────────────
+let camOrientation = "portrait";
 
 function setOrientation(o){
   camOrientation = o;
@@ -1941,25 +1970,25 @@ function setOrientation(o){
 }
 
 async function getCameraStream(facing){
-  const portrait = camOrientation === "portrait";
-  const constraints = {
-    audio: false,
-    video: {
-      facingMode: { ideal: facing },
-      width:  { ideal: portrait ? 720  : 1280 },
-      height: { ideal: portrait ? 1280 : 720  },
-      aspectRatio: { ideal: portrait ? 9/16 : 16/9 },
-    }
-  };
-  const s = await navigator.mediaDevices.getUserMedia(constraints);
+  // Front camera always portrait regardless of orientation selection
+  const portrait = (camOrientation === "portrait") || (facing === "user");
   try {
-    const track = s.getVideoTracks()[0];
-    const caps  = track.getCapabilities();
-    if(caps.zoom){
-      await track.applyConstraints({advanced:[{zoom:caps.zoom.min}]});
-    }
-  } catch(e){}
-  return s;
+    // Try ideal resolution first
+    return await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: facing },
+        width:  { ideal: portrait ? 720  : 1280 },
+        height: { ideal: portrait ? 1280 : 720  },
+      }
+    });
+  } catch(e) {
+    // Fallback — just request the camera with no size constraints
+    return await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: facing } }
+    });
+  }
 }
 
 async function toggleCamera(){
@@ -1983,7 +2012,7 @@ async function toggleCamera(){
       stream=await getCameraStream(facingMode);
       const video=document.getElementById("video");
       video.srcObject=stream;
-      video.className=facingMode==="user"?"mirror":"";
+      document.getElementById("video").className = facingMode==="user"?"mirror":"";
       await new Promise(r=>video.onloadedmetadata=r);
       video.play();
       document.getElementById("cam-off").style.display="none";
@@ -1994,8 +2023,9 @@ async function toggleCamera(){
       calibN=0;standY=null;botY=null;sessionFrames=[];recordedChunks=[];
       rangeHistory=[];peakY=0;repStart=0;
       // Reset gesture state
-      repActive=false;gestureHoldCount=0;countdownActive=false;countdownVal=3;
+      repActive=false;gestureHoldCount=0;countdownActive=false;countdownVal=5;
       document.getElementById("rep-num").textContent="0";
+      document.getElementById("flags-wrap").innerHTML="";
       btn.textContent="STOP & ANALYSE";btn.className="stop";btn.disabled=false;
       setStatus("gesture");
       // Preload voices and greet
@@ -2067,9 +2097,12 @@ async function flipCamera(){
   const video=document.getElementById("video");
   stream=await getCameraStream(facingMode);
   video.srcObject=stream;
-  video.className=facingMode==="user"?"mirror":"";
+  document.getElementById("video").className = facingMode==="user"?"mirror":"";
   await new Promise(r=>video.onloadedmetadata=r);
   video.play();
+  // Orientation picker only relevant for back camera
+  const op=document.getElementById("orient-picker");
+  if(op) op.style.opacity = facingMode==="user"?"0.3":"1";
 }
 
 function saveSession(){
