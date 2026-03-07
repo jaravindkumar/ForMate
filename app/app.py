@@ -1124,12 +1124,13 @@ html,body{width:100%;height:100%;overflow:hidden;
 #cam-container{position:relative;width:100%;height:100vh;
   background:#000;overflow:hidden;}
 
-/* Video fills container — object-fit:cover crops rather than letterboxes */
+/* Video uses contain — show full frame, no cropping */
 /* Front cam gets CSS mirror flip */
 video{
   position:absolute;top:0;left:0;
   width:100%;height:100%;
-  object-fit:cover;
+  object-fit:contain;
+  background:#000;
   pointer-events:none;}
 video.mirror{ transform:scaleX(-1); }
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
@@ -1894,13 +1895,12 @@ async function detect(){
   const ctx   =canvas.getContext("2d");
   const vW=video.videoWidth||720, vH=video.videoHeight||1280;
 
-  // object-fit:cover — video fills container, edges cropped (not letterboxed)
-  // Canvas must match container size; keypoint coords scale with cover math
+  // object-fit:contain — full frame visible, letterboxed
+  // Scale = fit within both dimensions, black bars fill the rest
   const cW=canvas.offsetWidth, cH=canvas.offsetHeight;
-  // Cover scale = fill both dimensions, crop the overflow
-  const scale=Math.max(cW/vW, cH/vH);
+  const scale=Math.min(cW/vW, cH/vH);
   const rW=vW*scale, rH=vH*scale;
-  const offX=(cW-rW)/2, offY=(cH-rH)/2;  // negative = cropped amount
+  const offX=(cW-rW)/2, offY=(cH-rH)/2;  // positive = letterbox bars
 
   canvas.width=cW; canvas.height=cH;
   try{
