@@ -2298,8 +2298,8 @@ function saveSession(){
             ext = Path(live_upload.name).suffix or ".webm"
 
             with st.spinner("Running pipeline on live session..."):
-                tmp_dir   = Path(tempfile.mkdtemp())
-                tmp_video = tmp_dir / f"live_session{ext}"
+                # Write to stable /tmp path — not mkdtemp (new dir each rerun)
+                tmp_video = Path(tempfile.gettempdir()) / f"formate_live{ext}"
                 live_upload.seek(0)
                 tmp_video.write_bytes(live_upload.read())
                 try:
