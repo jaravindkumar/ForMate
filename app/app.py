@@ -2447,23 +2447,31 @@ function saveSession(){
             m = _re.search(r'_(\d+)reps', live_upload.name)
             js_rep_count = int(m.group(1)) if m else None
 
+            # Preserve original extension — webm must stay webm for opencv
+            ext = Path(live_upload.name).suffix or ".webm"
+
             with st.spinner("Running pipeline on live session..."):
                 tmp_dir   = Path(tempfile.mkdtemp())
-                tmp_video = tmp_dir / "live_session.mp4"
+                tmp_video = tmp_dir / f"live_session{ext}"
                 live_upload.seek(0)
                 tmp_video.write_bytes(live_upload.read())
                 try:
                     result = run_pipeline(tmp_video, exercise, camera_view)
-                    # Inject JS rep count — ground truth from live counter
-                    if js_rep_count and js_rep_count > 0:
-                        sid, b_sum, g_sum, rep_df, num_reps, gold_dir = result
-                        g_sum["reps"] = js_rep_count
-                        result = (sid, b_sum, g_sum, rep_df, js_rep_count, gold_dir)
-                        st.session_state.live_rep_count = js_rep_count
-                    st.session_state.live_results = result
-                    st.session_state.live_processing_done = True
+                    if result is None:
+                        st.error("Pipeline failed — check the error above. You can still re-upload the video.")
+                    else:
+                        # Inject JS rep count — ground truth from live counter
+                        if js_rep_count and js_rep_count > 0:
+                            sid, b_sum, g_sum, rep_df, num_reps, gold_dir = result
+                            g_sum["reps"] = js_rep_count
+                            result = (sid, b_sum, g_sum, rep_df, js_rep_count, gold_dir)
+                            st.session_state.live_rep_count = js_rep_count
+                        st.session_state.live_results = result
+                        st.session_state.live_processing_done = True
                 except Exception as e:
                     st.error(f"Pipeline error: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
     # Live results
     if st.session_state.live_results:
