@@ -1,14 +1,7 @@
-# --- UI ---
 streamlit>=1.35.0
-
-# --- Data ---
 pandas>=2.0.0
 numpy<2
-
-# --- Computer vision ---
 opencv-python-headless>=4.8.0
 mediapipe>=0.10.14
 pillow>=10.0.0
-
-# --- Networking ---
 requests>=2.31.0
