@@ -920,7 +920,7 @@ with tab_upload:
     uc1, uc2 = st.columns(2)
     with uc1:
         st.markdown('<p class="lbl">Exercise</p>', unsafe_allow_html=True)
-        u_exercise = st.selectbox("", [
+        u_exercise = st.selectbox("Exercise", [
             "deadlift","squat","romanian_deadlift","goblet_squat","sumo_squat",
             "bulgarian_split_squat","shoulder_press","floor_press","lateral_raise",
             "bent_over_row","bicep_curl","single_arm_row","dumbbell_swing",
@@ -929,7 +929,7 @@ with tab_upload:
            key="u_exercise", label_visibility="collapsed")
     with uc2:
         st.markdown('<p class="lbl">Camera Angle</p>', unsafe_allow_html=True)
-        u_camera = st.selectbox("", ["front_oblique","side"],
+        u_camera = st.selectbox("Camera Angle", ["front_oblique","side"],
            key="u_camera", label_visibility="collapsed")
 
     # ── Simple Streamlit file uploader ────────────────────────────
