@@ -1,7 +1,7 @@
 """
 pipeline_bronze_extract.py — MediaPipe Tasks API (mediapipe >= 0.10)
 """
-import os, json, time, shutil, urllib.request
+import os, json, time, shutil, urllib.request, subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 import cv2
@@ -13,11 +13,12 @@ MODEL_NAME = "pose_landmarker_lite.task"
 YOLO17_TO_BP33 = {0:0,1:2,2:5,3:7,4:8,5:11,6:12,7:13,8:14,9:15,10:16,11:23,12:24,13:25,14:26,15:27,16:28}
 
 
+# ── Model download ─────────────────────────────────────────────────
+
 def _find_model():
     here = Path(__file__).resolve().parent
     for p in [here/MODEL_NAME, here.parent/MODEL_NAME, Path.cwd()/MODEL_NAME, Path("/tmp")/MODEL_NAME]:
         if p.exists() and p.stat().st_size > 100_000:
-            print(f"[bronze] Using cached model: {p}")
             return p
     return None
 
@@ -26,27 +27,84 @@ def _download_model():
     if dst.exists() and dst.stat().st_size > 100_000:
         return dst
     print(f"[bronze] Downloading model...")
-    try:
-        urllib.request.urlretrieve(MODEL_URL, str(dst))
-        print(f"[bronze] Downloaded ({dst.stat().st_size//1024} KB)")
-        return dst
-    except Exception as e:
-        raise RuntimeError(
-            f"Cannot download pose model: {e}\n"
-            f"Add pose_landmarker_lite.task to your repo root OR ensure network access."
-        )
+    urllib.request.urlretrieve(MODEL_URL, str(dst))
+    print(f"[bronze] Downloaded ({dst.stat().st_size//1024} KB)")
+    return dst
 
 def _get_model_path():
     return _find_model() or _download_model()
 
-def utc_now_iso():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00","Z")
 
-def make_session_id(exercise):
-    return datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + exercise
+# ── Video opening — returns a valid readable PATH (not cap) ────────
+
+def _ensure_readable(video_path: str) -> str:
+    """
+    Return a path that OpenCV can read frame-by-frame.
+    If the file can't be opened directly, convert via ffmpeg.
+    Always returns a fresh path — never a half-read cap object.
+    """
+    path = str(video_path)
+
+    # Quick check: can opencv open it and read at least one frame?
+    def cv_readable(p):
+        try:
+            cap = cv2.VideoCapture(p, cv2.CAP_FFMPEG)
+            if not cap.isOpened():
+                cap.release()
+                return False
+            ok, _ = cap.read()
+            cap.release()
+            return ok
+        except Exception:
+            return False
+
+    if cv_readable(path):
+        print(f"[bronze] OpenCV can read directly: {path}")
+        return path
+
+    # Try ffmpeg conversion → /tmp/formate_converted.mp4
+    print(f"[bronze] OpenCV cannot read {Path(path).name} — converting via ffmpeg...")
+    converted = Path("/tmp") / "formate_converted.mp4"
+    try:
+        ret = subprocess.run(
+            ["ffmpeg", "-y", "-i", path,
+             "-c:v", "libx264", "-preset", "ultrafast",
+             "-pix_fmt", "yuv420p",
+             "-an",        # no audio
+             str(converted)],
+            capture_output=True, timeout=180
+        )
+        if ret.returncode == 0 and converted.exists() and converted.stat().st_size > 1000:
+            if cv_readable(str(converted)):
+                print(f"[bronze] ffmpeg OK → {converted} ({converted.stat().st_size//1024} KB)")
+                return str(converted)
+            else:
+                print("[bronze] ffmpeg converted but still unreadable")
+        print("[bronze] ffmpeg stderr:", ret.stderr.decode()[-600:])
+    except Exception as e:
+        print(f"[bronze] ffmpeg exception: {e}")
+
+    # Diagnostic
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_streams", "-of", "json", path],
+            capture_output=True, timeout=30
+        )
+        diag = probe.stdout.decode()[:500] or probe.stderr.decode()[:500]
+    except Exception:
+        diag = "ffprobe unavailable"
+
+    raise RuntimeError(
+        f"Cannot read video: {Path(path).name}\n"
+        f"Size: {Path(path).stat().st_size} bytes\n"
+        f"ffprobe: {diag}\n"
+        "Try re-recording or converting to .mp4 with H.264."
+    )
 
 
-def _run_mediapipe(cap, fps, model_path, out_jsonl, session_id):
+# ── Pose runners ───────────────────────────────────────────────────
+
+def _run_mediapipe(video_path, fps, model_path, out_jsonl, session_id):
     from mediapipe.tasks.python.vision import PoseLandmarker, PoseLandmarkerOptions, RunningMode
     from mediapipe.tasks.python.core.base_options import BaseOptions
     import mediapipe as mp
@@ -59,13 +117,17 @@ def _run_mediapipe(cap, fps, model_path, out_jsonl, session_id):
         min_tracking_confidence=0.4,
     )
     frame_idx = detected = 0
+    cap = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
+
     with PoseLandmarker.create_from_options(opts) as lmk, out_jsonl.open("w") as f:
         while True:
             ok, frame = cap.read()
-            if not ok: break
+            if not ok:
+                break
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            res = lmk.detect_for_video(img, int(frame_idx * 1000 / fps))
+            ts_ms = int(frame_idx * 1000 / max(fps, 1))
+            res = lmk.detect_for_video(img, ts_ms)
             found = bool(res.pose_landmarks)
             lms = [{"id":i,"x":0.0,"y":0.0,"z":0.0,"vis":0.0} for i in range(33)]
             if found:
@@ -74,9 +136,14 @@ def _run_mediapipe(cap, fps, model_path, out_jsonl, session_id):
                     if i < 33:
                         lms[i] = {"id":i,"x":float(lm.x),"y":float(lm.y),
                                   "z":float(lm.z),"vis":float(lm.visibility)}
-            f.write(json.dumps({"session_id":session_id,"frame_idx":frame_idx,
-                "t_sec":float(frame_idx/fps),"pose_detected":found,"landmarks":lms})+"\n")
+            f.write(json.dumps({
+                "session_id": session_id, "frame_idx": frame_idx,
+                "t_sec": float(frame_idx / max(fps, 1)),
+                "pose_detected": found, "landmarks": lms
+            }) + "\n")
             frame_idx += 1
+
+    cap.release()
     return frame_idx, detected
 
 
@@ -84,16 +151,19 @@ def _try_yolo():
     try:
         from ultralytics import YOLO
         return YOLO("yolov8n-pose.pt")
-    except:
+    except Exception:
         return None
 
-def _run_yolo(cap, fps, width, height, model, out_jsonl, session_id):
+def _run_yolo(video_path, fps, yolo, out_jsonl, session_id):
+    cap = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
+    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 640)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
     frame_idx = detected = 0
     with out_jsonl.open("w") as f:
         while True:
             ok, frame = cap.read()
             if not ok: break
-            res = model(frame, verbose=False)
+            res = yolo(frame, verbose=False)
             lms = [{"id":i,"x":0.0,"y":0.0,"z":0.0,"vis":0.0} for i in range(33)]
             found = False
             r = res[0]
@@ -107,87 +177,59 @@ def _run_yolo(cap, fps, width, height, model, out_jsonl, session_id):
                         lms[bi] = {"id":bi,"x":x/max(width,1),"y":y/max(height,1),"z":0.0,"vis":c}
                         if c > 0.3: found = True
             if found: detected += 1
-            f.write(json.dumps({"session_id":session_id,"frame_idx":frame_idx,
-                "t_sec":float(frame_idx/fps),"pose_detected":found,"landmarks":lms})+"\n")
+            f.write(json.dumps({
+                "session_id":session_id,"frame_idx":frame_idx,
+                "t_sec":float(frame_idx/max(fps,1)),
+                "pose_detected":found,"landmarks":lms
+            })+"\n")
             frame_idx += 1
+    cap.release()
     return frame_idx, detected
 
 
-def _try_open(path):
-    """Try opening a video and reading one frame. Returns cap or None."""
-    for backend in [cv2.CAP_ANY, cv2.CAP_FFMPEG]:
-        try:
-            cap = cv2.VideoCapture(str(path), backend)
-            if cap.isOpened():
-                ok, _ = cap.read()
-                if ok:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    return cap
-            cap.release()
-        except Exception:
-            pass
-    return None
+# ── Utilities ──────────────────────────────────────────────────────
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00","Z")
+
+def make_session_id(exercise):
+    return datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + exercise
 
 
-def _open_video(path):
-    """Open video, converting via ffmpeg if OpenCV can't read it directly."""
-    path = str(path)
-    cap = _try_open(path)
-    if cap:
-        return cap
-
-    # OpenCV can't read it (common with webm/MediaRecorder output) — convert via ffmpeg
-    print(f"[bronze] OpenCV can't read {path} — converting via ffmpeg...")
-    converted = Path(path).with_suffix(".converted.mp4")
-    try:
-        import subprocess
-        ret = subprocess.run(
-            ["ffmpeg", "-y", "-i", path,
-             "-c:v", "libx264", "-preset", "fast",
-             "-an",   # drop audio
-             str(converted)],
-            capture_output=True, timeout=120
-        )
-        if ret.returncode != 0:
-            print("[bronze] ffmpeg stderr:", ret.stderr.decode()[-500:])
-        else:
-            print(f"[bronze] ffmpeg converted OK ({converted.stat().st_size} bytes)")
-    except Exception as e:
-        print(f"[bronze] ffmpeg failed: {e}")
-
-    if converted.exists() and converted.stat().st_size > 1000:
-        cap = _try_open(str(converted))
-        if cap:
-            return cap
-
-    raise RuntimeError(
-        f"Cannot open video: {path}\n"
-        f"Size: {Path(path).stat().st_size} bytes\n"
-        f"ffmpeg conversion also failed. Check packages.txt includes ffmpeg."
-    )
-
+# ── Main entry point ───────────────────────────────────────────────
 
 def extract_bronze(video_path, out_root="pipeline/bronze", exercise="deadlift",
                    camera_view="front_oblique", write_overlay=False, model_dir=None):
+
     video_path = str(os.path.abspath(video_path))
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
-    print(f"[bronze] Input: {video_path} ({Path(video_path).stat().st_size} bytes)")
+
+    sz = Path(video_path).stat().st_size
+    print(f"[bronze] Input: {video_path} ({sz} bytes)")
+
+    if sz < 1000:
+        raise RuntimeError(f"Video file too small ({sz} bytes) — upload may have failed.")
+
+    # Ensure OpenCV can read it (converts via ffmpeg if needed)
+    readable_path = _ensure_readable(video_path)
+
+    # Get video properties from the readable file
+    cap = cv2.VideoCapture(str(readable_path), cv2.CAP_FFMPEG)
+    fps     = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    width   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)  or 640)
+    height  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
+    nframes = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)  or 0)
+    cap.release()  # ALWAYS release before passing path to runners
+    print(f"[bronze] {width}x{height} @ {fps:.1f}fps ~{nframes} frames")
 
     session_id = make_session_id(exercise)
     out_dir = Path(out_root) / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    orig_ext = Path(video_path).suffix or ".mp4"
-    input_copy = out_dir / f"input{orig_ext}"
-    shutil.copy2(video_path, str(input_copy))
-
-    cap = _open_video(str(input_copy))
-    fps    = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
-    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 640)
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
-    nframes= int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    print(f"[bronze] {width}x{height} @ {fps:.1f}fps ~{nframes} frames")
+    # Copy readable file to session dir
+    input_copy = out_dir / "input.mp4"
+    shutil.copy2(readable_path, str(input_copy))
 
     out_jsonl = out_dir / "keypoints.jsonl"
     t0 = time.time()
@@ -195,32 +237,42 @@ def extract_bronze(video_path, out_root="pipeline/bronze", exercise="deadlift",
     yolo = _try_yolo()
     if yolo:
         model_name = "yolov8n-pose"
-        frame_idx, detected = _run_yolo(cap, fps, width, height, yolo, out_jsonl, session_id)
+        frame_idx, detected = _run_yolo(str(input_copy), fps, yolo, out_jsonl, session_id)
     else:
         model_name = "mediapipe-pose-landmarker-lite"
         model_path = _get_model_path()
-        frame_idx, detected = _run_mediapipe(cap, fps, model_path, out_jsonl, session_id)
-    cap.release()
+        frame_idx, detected = _run_mediapipe(str(input_copy), fps, model_path, out_jsonl, session_id)
+
     elapsed = time.time() - t0
+    print(f"[bronze] Done: {frame_idx} frames, {detected} with pose ({elapsed:.1f}s)")
 
     if frame_idx == 0:
-        raise RuntimeError("No frames read — file may be corrupt or unsupported format.")
-    print(f"[bronze] Done: {frame_idx} frames, {detected} detected ({elapsed:.1f}s)")
+        raise RuntimeError(
+            f"No frames read from {Path(readable_path).name}.\n"
+            f"ffmpeg converted: {readable_path != video_path}\n"
+            f"input_copy size: {input_copy.stat().st_size if input_copy.exists() else 0}"
+        )
 
-    meta = {"session_id":session_id,"exercise":exercise,"camera_view":camera_view,
-            "input_video":str(input_copy),"source_video_path":video_path,
-            "fps":fps,"width":width,"height":height,"num_frames":nframes,
-            "created_utc":utc_now_iso(),"model":model_name}
-    (out_dir/"meta.json").write_text(json.dumps(meta,indent=2))
+    meta = {
+        "session_id":session_id, "exercise":exercise, "camera_view":camera_view,
+        "input_video":str(input_copy), "source_video_path":video_path,
+        "fps":fps, "width":width, "height":height, "num_frames":nframes,
+        "created_utc":utc_now_iso(), "model":model_name
+    }
+    (out_dir/"meta.json").write_text(json.dumps(meta, indent=2))
 
-    summary = {"session_id":session_id,"model_used":model_name,
-               "frames_processed":frame_idx,"pose_detected_frames":detected,
-               "pose_detected_ratio":float(detected/max(frame_idx,1)),
-               "elapsed_sec":float(elapsed),
-               "outputs":{"session_dir":str(out_dir),"meta":str(out_dir/"meta.json"),
-                          "input_copy":str(input_copy),"keypoints_jsonl":str(out_jsonl),
-                          "overlay_mp4":None}}
-    (out_dir/"summary.json").write_text(json.dumps(summary,indent=2))
+    summary = {
+        "session_id":session_id, "model_used":model_name,
+        "frames_processed":frame_idx, "pose_detected_frames":detected,
+        "pose_detected_ratio":float(detected/max(frame_idx,1)),
+        "elapsed_sec":float(elapsed),
+        "outputs":{
+            "session_dir":str(out_dir), "meta":str(out_dir/"meta.json"),
+            "input_copy":str(input_copy), "keypoints_jsonl":str(out_jsonl),
+            "overlay_mp4":None
+        }
+    }
+    (out_dir/"summary.json").write_text(json.dumps(summary, indent=2))
     return session_id
 
 
