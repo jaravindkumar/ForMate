@@ -909,6 +909,31 @@ with tab_upload:
     import streamlit.components.v1 as components
 
     st.markdown('<div class="zone">', unsafe_allow_html=True)
+
+    # ── File uploader at top level — NOT inside a column ──────────
+    # Putting it inside a column causes scope loss on rerun
+    st.markdown('<p class="lbl">Upload Video</p>', unsafe_allow_html=True)
+    uploaded = st.file_uploader("", type=["mp4","mov","m4v","webm"], label_visibility="collapsed")
+
+    # Save to a stable /tmp path — tempfile.mkdtemp() creates a new dir
+    # each rerun which breaks the path stored in session_state
+    if uploaded is not None:
+        file_id = f"{uploaded.name}_{uploaded.size}"
+        if st.session_state.get("upload_file_id") != file_id:
+            st.session_state.upload_file_id  = file_id
+            st.session_state.upload_results  = None
+            safe_name = "".join(c for c in uploaded.name if c.isalnum() or c in "._-")
+            tmp_path  = Path(tempfile.gettempdir()) / f"formate_{safe_name}"
+            uploaded.seek(0)
+            tmp_path.write_bytes(uploaded.read())
+            st.session_state.upload_tmp_video = str(tmp_path)
+    else:
+        st.session_state.pop("upload_file_id",  None)
+        st.session_state.pop("upload_tmp_video", None)
+
+    # Always read from session_state — survives all reruns
+    tmp_video_path = st.session_state.get("upload_tmp_video")
+
     uz_l, uz_r = st.columns([1, 1], gap="large")
 
     with uz_l:
@@ -917,31 +942,13 @@ with tab_upload:
             '<p class="uz-desc">Upload a workout video. The AI pipeline scores every rep, flags breakdowns in real-time, and generates a full coaching report.</p>',
             unsafe_allow_html=True
         )
-        st.markdown('<p class="lbl">Upload Video</p>', unsafe_allow_html=True)
-        uploaded = st.file_uploader("", type=["mp4","mov","m4v","webm"], label_visibility="collapsed")
-
-        # ── Persist uploaded file to session state immediately ─────
         if uploaded is not None:
-            # New file uploaded — save bytes and clear old results
-            file_id = f"{uploaded.name}_{uploaded.size}"
-            if st.session_state.get("upload_file_id") != file_id:
-                st.session_state.upload_file_id = file_id
-                st.session_state.upload_results = None
-                tmp_dir = Path(tempfile.mkdtemp())
-                tmp_video = tmp_dir / uploaded.name
-                uploaded.seek(0)
-                tmp_video.write_bytes(uploaded.read())
-                st.session_state.upload_tmp_video = str(tmp_video)
-
             fname = uploaded.name
             fmb   = str(round(uploaded.size / (1024*1024), 1))
             st.markdown('<div class="fok">&#10003; ' + fname + ' &middot; ' + fmb + ' MB</div>', unsafe_allow_html=True)
-        else:
-            st.session_state.pop("upload_file_id", None)
-            st.session_state.pop("upload_tmp_video", None)
-
-        # Retrieve persisted video path
-        tmp_video_path = st.session_state.get("upload_tmp_video")
+        if tmp_video_path and not Path(tmp_video_path).exists():
+            st.warning("Temp file missing — please re-upload.")
+            tmp_video_path = None
 
     with uz_r:
         if tmp_video_path and Path(tmp_video_path).exists():
