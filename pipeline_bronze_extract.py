@@ -113,19 +113,57 @@ def _run_yolo(cap, fps, width, height, model, out_jsonl, session_id):
     return frame_idx, detected
 
 
-def _open_video(path):
+def _try_open(path):
+    """Try opening a video and reading one frame. Returns cap or None."""
     for backend in [cv2.CAP_ANY, cv2.CAP_FFMPEG]:
-        cap = cv2.VideoCapture(path, backend)
-        if cap.isOpened():
-            # Read one frame to verify
-            ok, _ = cap.read()
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            if ok:
-                return cap
-        cap.release()
+        try:
+            cap = cv2.VideoCapture(str(path), backend)
+            if cap.isOpened():
+                ok, _ = cap.read()
+                if ok:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    return cap
+            cap.release()
+        except Exception:
+            pass
+    return None
+
+
+def _open_video(path):
+    """Open video, converting via ffmpeg if OpenCV can't read it directly."""
+    path = str(path)
+    cap = _try_open(path)
+    if cap:
+        return cap
+
+    # OpenCV can't read it (common with webm/MediaRecorder output) — convert via ffmpeg
+    print(f"[bronze] OpenCV can't read {path} — converting via ffmpeg...")
+    converted = Path(path).with_suffix(".converted.mp4")
+    try:
+        import subprocess
+        ret = subprocess.run(
+            ["ffmpeg", "-y", "-i", path,
+             "-c:v", "libx264", "-preset", "fast",
+             "-an",   # drop audio
+             str(converted)],
+            capture_output=True, timeout=120
+        )
+        if ret.returncode != 0:
+            print("[bronze] ffmpeg stderr:", ret.stderr.decode()[-500:])
+        else:
+            print(f"[bronze] ffmpeg converted OK ({converted.stat().st_size} bytes)")
+    except Exception as e:
+        print(f"[bronze] ffmpeg failed: {e}")
+
+    if converted.exists() and converted.stat().st_size > 1000:
+        cap = _try_open(str(converted))
+        if cap:
+            return cap
+
     raise RuntimeError(
-        f"Cannot open video: {path} ({Path(path).stat().st_size} bytes)\n"
-        f"Supported formats: .mp4, .mov, .avi — try re-encoding as mp4."
+        f"Cannot open video: {path}\n"
+        f"Size: {Path(path).stat().st_size} bytes\n"
+        f"ffmpeg conversion also failed. Check packages.txt includes ffmpeg."
     )
 
 
