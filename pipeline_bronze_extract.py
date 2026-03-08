@@ -126,14 +126,27 @@ def extract_bronze(video_path, out_root="pipeline/bronze", exercise="deadlift",
     out_dir = Path(out_root) / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    input_copy = out_dir / "input.mp4"
+    # Keep original extension so opencv/ffmpeg picks right codec
+    orig_ext = Path(video_path).suffix or ".mp4"
+    input_copy = out_dir / f"input{orig_ext}"
     shutil.copy2(video_path, str(input_copy))
 
+    # Try input_copy first, fallback to original path, then try direct bytes
     cap = cv2.VideoCapture(str(input_copy))
-    if not cap.isOpened():
+    if not cap.isOpened() or cap.get(cv2.CAP_PROP_FRAME_COUNT) < 1:
+        cap.release()
         cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened() or cap.get(cv2.CAP_PROP_FRAME_COUNT) < 1:
+        cap.release()
+        # Last resort: read raw bytes via numpy (works for some webm)
+        try:
+            data = np.frombuffer(open(video_path, 'rb').read(), dtype=np.uint8)
+            cap = cv2.VideoCapture()
+            cap.open(video_path)
+        except Exception:
+            pass
     if not cap.isOpened():
-        raise RuntimeError(f"Failed to open video: {video_path}")
+        raise RuntimeError(f"Failed to open video: {video_path}\nTry uploading as .mp4 instead of .webm")
 
     fps        = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     width      = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)  or 640)
@@ -150,7 +163,11 @@ def extract_bronze(video_path, out_root="pipeline/bronze", exercise="deadlift",
         frame_idx, detected_frames = _run_yolo(cap, fps, width, height, yolo_model, out_jsonl, session_id)
     else:
         model_name = "mediapipe-pose-landmarker-lite"
-        m_dir = Path(model_dir) if model_dir else Path(out_root).parent.parent
+        # Store model next to this script (stable location regardless of CWD)
+        if model_dir:
+            m_dir = Path(model_dir)
+        else:
+            m_dir = Path(__file__).resolve().parent
         model_path = _get_model_path(m_dir)
         frame_idx, detected_frames = _run_mediapipe_tasks(cap, fps, width, height, model_path, out_jsonl, session_id)
 

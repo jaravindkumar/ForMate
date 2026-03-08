@@ -41,29 +41,32 @@ def angle_deg(v1: np.ndarray, v2: np.ndarray) -> float:
     return float(np.degrees(np.arccos(c)))
 
 
-def compute_rep_metrics(df: pd.DataFrame, reps: pd.DataFrame) -> pd.DataFrame:
+def compute_rep_metrics(df: pd.DataFrame, reps: pd.DataFrame, exercise: str = "deadlift") -> pd.DataFrame:
     rows = []
+    HINGE_EX = {"deadlift","romanian_deadlift","dumbbell_deadlift","bent_over_row","single_arm_row","dumbbell_swing"}
+    is_hinge = exercise in HINGE_EX
+
     for rep_id in sorted(reps["rep_id"].unique()):
         sub = df[df["rep_id"] == rep_id].copy()
         if sub.empty:
             continue
 
-        pull = sub[sub["phase"] == "pull"]
-        descent = sub[sub["phase"] == "descent"]
+        # Flexible phase names — deadlift uses pull/descent, squat uses descent/ascent
+        concentric = sub[sub["phase"].isin(["pull", "descent"])] if is_hinge else sub[sub["phase"] == "descent"]
+        eccentric  = sub[sub["phase"].isin(["descent"])]         if is_hinge else sub[sub["phase"] == "ascent"]
 
-        t_pull = float(pull["t_sec"].max() - pull["t_sec"].min()) if not pull.empty else np.nan
-        t_desc = float(descent["t_sec"].max() - descent["t_sec"].min()) if not descent.empty else np.nan
+        t_pull = float(concentric["t_sec"].max() - concentric["t_sec"].min()) if not concentric.empty else np.nan
+        t_desc = float(eccentric["t_sec"].max()  - eccentric["t_sec"].min())  if not eccentric.empty  else np.nan
 
-        # hinge proxy: compare hip movement vs knee movement during pull
-        # using y (normalised). smaller y means higher on screen.
-        if not pull.empty:
-            hip_y0 = float(((pull["l_hip_y_n"] + pull["r_hip_y_n"]) / 2.0).iloc[0])
-            hip_y1 = float(((pull["l_hip_y_n"] + pull["r_hip_y_n"]) / 2.0).iloc[-1])
-            knee_y0 = float(((pull["l_knee_y_n"] + pull["r_knee_y_n"]) / 2.0).iloc[0])
-            knee_y1 = float(((pull["l_knee_y_n"] + pull["r_knee_y_n"]) / 2.0).iloc[-1])
-
-            d_hip = abs(hip_y1 - hip_y0)
-            d_knee = abs(knee_y1 - knee_y0)
+        # Movement quality proxy
+        active = concentric if not concentric.empty else sub
+        if not active.empty and "l_hip_y_n" in active.columns and "l_knee_y_n" in active.columns:
+            hip_y0   = float(((active["l_hip_y_n"] + active["r_hip_y_n"]) / 2.0).iloc[0])
+            hip_y1   = float(((active["l_hip_y_n"] + active["r_hip_y_n"]) / 2.0).iloc[-1])
+            knee_y0  = float(((active["l_knee_y_n"] + active["r_knee_y_n"]) / 2.0).iloc[0])
+            knee_y1  = float(((active["l_knee_y_n"] + active["r_knee_y_n"]) / 2.0).iloc[-1])
+            d_hip    = abs(hip_y1 - hip_y0)
+            d_knee   = abs(knee_y1 - knee_y0)
             hinge_ratio = float(d_hip / (d_knee + 1e-9))
         else:
             hinge_ratio = np.nan
@@ -123,12 +126,20 @@ def run_gold(session_id: str, exercise: str = "deadlift") -> dict:
     ref = np.array([0.0, -1.0])  # vertical up
     df["trunk_angle_deg"] = np.array([angle_deg(v, ref) for v in vec])
 
-    # Keep only valid reps
+    # Keep only valid reps — handle both deadlift and squat rep tables
     reps_valid = reps.copy()
-    reps_valid = reps_valid[reps_valid["frames"] >= 5].reset_index(drop=True)
+    if "frames" in reps_valid.columns:
+        reps_valid = reps_valid[reps_valid["frames"] >= 5].reset_index(drop=True)
+    # If no reps detected, create synthetic one for whole session scoring
+    if reps_valid.empty or (reps_valid["rep_id"] < 0).all():
+        reps_valid = pd.DataFrame([{"rep_id": 0, "t_start": float(df["t_sec"].min()),
+                                     "t_end": float(df["t_sec"].max()), "frames": len(df)}])
+        df = df.copy()
+        df["rep_id"] = 0
+        df["phase"] = "pull"
 
     # Rep metrics table
-    rep_metrics = compute_rep_metrics(df, reps_valid)
+    rep_metrics = compute_rep_metrics(df, reps_valid, exercise=exercise)
 
     # Aggregate metrics
     tempo_pull_med = float(np.nanmedian(rep_metrics["t_pull_s"])) if not rep_metrics.empty else np.nan
@@ -140,8 +151,11 @@ def run_gold(session_id: str, exercise: str = "deadlift") -> dict:
     shoulder_sym_med = float(np.nanmedian(rep_metrics["shoulder_sym"])) if not rep_metrics.empty else np.nan
     knee_sym_med = float(np.nanmedian(rep_metrics["knee_sym"])) if not rep_metrics.empty else np.nan
 
-    # Setup consistency proxy: ankle x variation during setup frames
-    setup = df[df["phase"] == "setup"]
+    # Setup consistency proxy: ankle x variation during stable frames
+    if "phase" in df.columns:
+        setup = df[df["phase"] == "setup"]
+    else:
+        setup = pd.DataFrame()
     if setup.empty:
         setup_x_std = float(np.nanstd((df["l_ankle_x_n"] + df["r_ankle_x_n"]) / 2.0))
     else:
@@ -197,7 +211,7 @@ def run_gold(session_id: str, exercise: str = "deadlift") -> dict:
 
     # Identify problematic frames
     issues = []
-    if trunk_control < 60 and np.isfinite(trunk_p95):
+    if trunk_control < 60 and np.isfinite(trunk_p95) and "trunk_angle_deg" in df.columns:
         # Frames where trunk angle > 25 deg
         bad_frames = df[df["trunk_angle_deg"] > 25]["frame_idx"].tolist()
         if bad_frames:
