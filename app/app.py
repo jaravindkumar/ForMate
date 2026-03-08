@@ -909,46 +909,61 @@ with tab_upload:
     import streamlit.components.v1 as components
 
     st.markdown('<div class="zone">', unsafe_allow_html=True)
+    st.markdown(
+        '<h2 class="uz-headline">Perfect Your <span>Form.</span></h2>'
+        '<p class="uz-desc">Upload a workout video — the AI pipeline scores every rep and generates a coaching report.</p>',
+        unsafe_allow_html=True
+    )
 
-    # ── File uploader at top level — NOT inside a column ──────────
-    # Putting it inside a column causes scope loss on rerun
-    st.markdown('<p class="lbl">Upload Video</p>', unsafe_allow_html=True)
-    uploaded = st.file_uploader("", type=["mp4","mov","m4v","webm"], label_visibility="collapsed")
+    # ── File uploader — flat layout, no columns, maximum compatibility ──
+    uploaded = st.file_uploader(
+        "Choose a video file",
+        type=["mp4","mov","m4v","webm"],
+        label_visibility="visible",
+        key="upload_widget"
+    )
 
-    # Save to a stable /tmp path — tempfile.mkdtemp() creates a new dir
-    # each rerun which breaks the path stored in session_state
+    # Persist file bytes immediately on upload
+    # CRITICAL: never clear session_state when uploaded is None —
+    # Streamlit sets uploaded=None on every rerun after initial upload
     if uploaded is not None:
         file_id = f"{uploaded.name}_{uploaded.size}"
         if st.session_state.get("upload_file_id") != file_id:
-            st.session_state.upload_file_id  = file_id
-            st.session_state.upload_results  = None
+            st.session_state.upload_file_id   = file_id
+            st.session_state.upload_results   = None
             safe_name = "".join(c for c in uploaded.name if c.isalnum() or c in "._-")
             tmp_path  = Path(tempfile.gettempdir()) / f"formate_{safe_name}"
             uploaded.seek(0)
             tmp_path.write_bytes(uploaded.read())
             st.session_state.upload_tmp_video = str(tmp_path)
-    else:
-        st.session_state.pop("upload_file_id",  None)
-        st.session_state.pop("upload_tmp_video", None)
+            st.success(f"✓ {uploaded.name} saved ({round(uploaded.size/1024/1024,1)} MB)")
 
-    # Always read from session_state — survives all reruns
+    # Read from session_state — survives all reruns
     tmp_video_path = st.session_state.get("upload_tmp_video")
 
-    uz_l, uz_r = st.columns([1, 1], gap="large")
-
-    with uz_l:
-        st.markdown(
-            '<h2 class="uz-headline">Perfect Your<br><span>Form.</span></h2>'
-            '<p class="uz-desc">Upload a workout video. The AI pipeline scores every rep, flags breakdowns in real-time, and generates a full coaching report.</p>',
-            unsafe_allow_html=True
-        )
-        if uploaded is not None:
-            fname = uploaded.name
-            fmb   = str(round(uploaded.size / (1024*1024), 1))
-            st.markdown('<div class="fok">&#10003; ' + fname + ' &middot; ' + fmb + ' MB</div>', unsafe_allow_html=True)
-        if tmp_video_path and not Path(tmp_video_path).exists():
-            st.warning("Temp file missing — please re-upload.")
+    # Show what's loaded
+    if tmp_video_path:
+        if Path(tmp_video_path).exists():
+            fname = Path(tmp_video_path).name.replace("formate_","")
+            fsize = round(Path(tmp_video_path).stat().st_size/1024/1024, 1)
+            st.markdown(f'<div class="fok">&#10003; {fname} &middot; {fsize} MB ready</div>',
+                       unsafe_allow_html=True)
+            col_clear, _ = st.columns([1, 3])
+            with col_clear:
+                if st.button("✕ Clear video", key="clear_upload"):
+                    st.session_state.pop("upload_file_id", None)
+                    st.session_state.pop("upload_tmp_video", None)
+                    st.session_state.pop("upload_results", None)
+                    st.rerun()
+        else:
+            st.warning("File missing from disk — please re-upload.")
+            st.session_state.pop("upload_file_id", None)
+            st.session_state.pop("upload_tmp_video", None)
             tmp_video_path = None
+
+    uz_l, uz_r = st.columns([1, 1], gap="large")
+    with uz_l:
+        pass  # left col reserved for future preview
 
     with uz_r:
         if tmp_video_path and Path(tmp_video_path).exists():
