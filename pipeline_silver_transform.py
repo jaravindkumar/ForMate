@@ -29,6 +29,94 @@ def safe_medfilt(x: np.ndarray, k: int = 5) -> np.ndarray:
     return s.rolling(k, center=True, min_periods=1).median().to_numpy()
 
 
+
+def segment_squat_reps(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Squat/press/curl rep = top -> bottom -> top
+    Track mid-hip Y (increases as person descends = squats)
+    For upper body (press/curl), track mid-wrist Y (rises on concentric)
+    """
+    df = df.copy()
+
+    # Use hip Y for lower body, wrist Y for upper body — both work similarly
+    # Hip goes DOWN (Y increases) in squats; wrist goes UP (Y decreases) in press
+    # Invert wrist so both signals peak at bottom of range
+    hip_y = (df["l_hip_y_n"] + df["r_hip_y_n"]) / 2.0
+    sig = hip_y.rolling(11, center=True, min_periods=1).mean()
+
+    values = sig.to_numpy()
+    dt = np.median(np.diff(df["t_sec"])) if len(df) > 5 else (1.0 / 30.0)
+    fps = 1.0 / dt if dt > 0 else 30.0
+
+    min_sep = int(0.8 * fps)  # min 0.8s between reps
+
+    peak_thr   = np.nanpercentile(values, 75)   # near bottom of squat
+    trough_thr = np.nanpercentile(values, 35)   # near top / standing
+
+    # Find peaks (bottoms of squat) and troughs (tops/standing)
+    peaks = []
+    last = -10**9
+    for i in range(2, len(values) - 2):
+        if i - last < min_sep: continue
+        v = values[i]
+        if np.isnan(v): continue
+        if v > values[i-1] and v > values[i+1] and v > peak_thr:
+            peaks.append(i); last = i
+
+    troughs = []
+    last = -10**9
+    for i in range(2, len(values) - 2):
+        if i - last < min_sep: continue
+        v = values[i]
+        if np.isnan(v): continue
+        if v < values[i-1] and v < values[i+1] and v < trough_thr:
+            troughs.append(i); last = i
+
+    rep_id = np.full(len(df), -1, dtype=int)
+    phase  = np.array(["unknown"] * len(df), dtype=object)
+
+    if len(peaks) < 1 or len(troughs) < 1:
+        df["rep_id"] = rep_id
+        df["phase"]  = phase
+        df["seg_signal"] = sig
+        df["peak"] = False
+        df["trough"] = False
+        return df
+
+    rep_counter = 0
+    all_events = sorted([(i, "peak") for i in peaks] + [(i, "trough") for i in troughs])
+
+    i = 0
+    while i < len(all_events) - 1:
+        idx_a, kind_a = all_events[i]
+        idx_b, kind_b = all_events[i+1]
+        if kind_a == "trough" and kind_b == "peak":
+            # trough (top) -> peak (bottom) -> find next trough
+            if i + 2 < len(all_events):
+                idx_c, kind_c = all_events[i+2]
+                if kind_c == "trough":
+                    a, b, c = idx_a, idx_b, idx_c
+                    rep_id[a:c+1] = rep_counter
+                    for k in range(a, c+1):
+                        t = float(df.iloc[k]["t_sec"])
+                        if k <= b:
+                            phase[k] = "descent"
+                        else:
+                            phase[k] = "ascent"
+                    rep_counter += 1
+                    i += 2
+                    continue
+        i += 1
+
+    df["rep_id"] = rep_id
+    df["phase"]  = phase
+    df["seg_signal"] = sig
+    df["peak"]   = False
+    df["trough"] = False
+    if peaks:   df.loc[df.index[peaks],   "peak"]   = True
+    if troughs: df.loc[df.index[troughs], "trough"] = True
+    return df
+
 def segment_deadlift_reps(df: pd.DataFrame) -> pd.DataFrame:
     """
     Deadlift rep = bottom -> lockout -> bottom
@@ -191,16 +279,15 @@ def run_silver(session_dir: str) -> dict:
     df["r_wrist_x_n"] = df["r_wrist_x"]
     df["r_wrist_y_n"] = df["r_wrist_y"]
 
-    # Segment reps
-    if exercise == "deadlift":
+    # Segment reps — use shoulder/hip Y signal for all exercises
+    # Deadlift: shoulder rises (hip hinge → lockout)
+    # Squat/all others: hip drops then rises
+    HINGE_EXERCISES = {"deadlift", "romanian_deadlift", "dumbbell_deadlift",
+                       "bent_over_row", "single_arm_row", "dumbbell_swing"}
+    if exercise in HINGE_EXERCISES:
         df = segment_deadlift_reps(df)
     else:
-        # placeholder for squat segmentation later
-        df["rep_id"] = -1
-        df["phase"] = "unknown"
-        df["seg_signal"] = 0.0
-        df["peak"] = False
-        df["trough"] = False
+        df = segment_squat_reps(df)
 
     # reps table
     reps = (
