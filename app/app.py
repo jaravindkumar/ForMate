@@ -858,9 +858,10 @@ for key, default in [
     ("live_annotated_vid", None),
     ("live_processing_done", False),
     ("upload_results",     None),
-    ("upload_file_id",     None),
-    ("upload_tmp_video",   None),
-    ("upload_results",     None),
+    ("u_fid",              None),
+    ("u_bytes",            None),
+    ("u_name",             None),
+    ("u_result",           None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -892,10 +893,10 @@ with ctrl_l:
         "shoulder_press", "floor_press", "lateral_raise",
         "bent_over_row", "bicep_curl", "single_arm_row",
         "dumbbell_swing", "russian_twist", "renegade_row",
-    ], format_func=lambda x: x.replace("_"," ").title())
+    ], format_func=lambda x: x.replace("_"," ").title(), key="sel_exercise")
 with ctrl_r:
     st.markdown('<p class="lbl">Camera Angle</p>', unsafe_allow_html=True)
-    camera_view = st.selectbox("Camera", ["front_oblique", "side"])
+    camera_view = st.selectbox("Camera", ["front_oblique", "side"], key="sel_camera")
 
 # ─── TABS ─────────────────────────────────────────────────────────
 tab_upload, tab_live, tab_library = st.tabs(["Upload Video", "Live Trainer", "Workout Library"])
@@ -905,275 +906,80 @@ tab_upload, tab_live, tab_library = st.tabs(["Upload Video", "Live Trainer", "Wo
 # TAB 1 — UPLOAD VIDEO
 # ════════════════════════════════════════════
 with tab_upload:
-    import base64
+    import base64, io
     import streamlit.components.v1 as components
 
     st.markdown('<div class="zone">', unsafe_allow_html=True)
     st.markdown(
         '<h2 class="uz-headline">Perfect Your <span>Form.</span></h2>'
-        '<p class="uz-desc">Upload a workout video — the AI pipeline scores every rep and generates a coaching report.</p>',
+        '<p class="uz-desc">Upload a workout video — AI scores every rep and generates a coaching report.</p>',
         unsafe_allow_html=True
     )
 
-    # ── File uploader — flat layout, no columns, maximum compatibility ──
+    # ── Exercise & camera selectors (in-tab copies) ───────────────
+    uc1, uc2 = st.columns(2)
+    with uc1:
+        st.markdown('<p class="lbl">Exercise</p>', unsafe_allow_html=True)
+        u_exercise = st.selectbox("", [
+            "deadlift","squat","romanian_deadlift","goblet_squat","sumo_squat",
+            "bulgarian_split_squat","shoulder_press","floor_press","lateral_raise",
+            "bent_over_row","bicep_curl","single_arm_row","dumbbell_swing",
+            "russian_twist","renegade_row",
+        ], format_func=lambda x: x.replace("_"," ").title(),
+           key="u_exercise", label_visibility="collapsed")
+    with uc2:
+        st.markdown('<p class="lbl">Camera Angle</p>', unsafe_allow_html=True)
+        u_camera = st.selectbox("", ["front_oblique","side"],
+           key="u_camera", label_visibility="collapsed")
+
+    # ── Simple Streamlit file uploader ────────────────────────────
     uploaded = st.file_uploader(
-        "Choose a video file",
-        type=["mp4","mov","m4v","webm"],
-        label_visibility="visible",
-        key="upload_widget"
+        "📁 Choose a video file",
+        type=["video/mp4","video/quicktime","video/x-m4v","video/webm","mp4","mov","m4v","webm"],
+        key="u_file"
     )
 
-    # Persist file bytes immediately on upload
-    # CRITICAL: never clear session_state when uploaded is None —
-    # Streamlit sets uploaded=None on every rerun after initial upload
     if uploaded is not None:
-        file_id = f"{uploaded.name}_{uploaded.size}"
-        if st.session_state.get("upload_file_id") != file_id:
-            st.session_state.upload_file_id   = file_id
-            st.session_state.upload_results   = None
-            safe_name = "".join(c for c in uploaded.name if c.isalnum() or c in "._-")
-            tmp_path  = Path(tempfile.gettempdir()) / f"formate_{safe_name}"
+        # Store bytes in session_state immediately — survives reruns
+        fid = f"{uploaded.name}_{uploaded.size}"
+        if st.session_state.get("u_fid") != fid:
             uploaded.seek(0)
-            tmp_path.write_bytes(uploaded.read())
-            st.session_state.upload_tmp_video = str(tmp_path)
-            st.success(f"✓ {uploaded.name} saved ({round(uploaded.size/1024/1024,1)} MB)")
+            st.session_state["u_fid"]   = fid
+            st.session_state["u_bytes"] = uploaded.read()
+            st.session_state["u_name"]  = uploaded.name
+            st.session_state["u_result"] = None
 
-    # Read from session_state — survives all reruns
-    tmp_video_path = st.session_state.get("upload_tmp_video")
+    b = st.session_state.get("u_bytes")
+    n = st.session_state.get("u_name", "video.mp4")
 
-    # Show what's loaded
-    if tmp_video_path:
-        if Path(tmp_video_path).exists():
-            fname = Path(tmp_video_path).name.replace("formate_","")
-            fsize = round(Path(tmp_video_path).stat().st_size/1024/1024, 1)
-            st.markdown(f'<div class="fok">&#10003; {fname} &middot; {fsize} MB ready</div>',
-                       unsafe_allow_html=True)
-            col_clear, _ = st.columns([1, 3])
-            with col_clear:
-                if st.button("✕ Clear video", key="clear_upload"):
-                    st.session_state.pop("upload_file_id", None)
-                    st.session_state.pop("upload_tmp_video", None)
-                    st.session_state.pop("upload_results", None)
-                    st.rerun()
-        else:
-            st.warning("File missing from disk — please re-upload.")
-            st.session_state.pop("upload_file_id", None)
-            st.session_state.pop("upload_tmp_video", None)
-            tmp_video_path = None
+    if b:
+        mb = round(len(b)/1024/1024, 1)
+        st.success(f"✓ {n}  ({mb} MB) — ready to analyse")
+        st.video(b)
 
-    uz_l, uz_r = st.columns([1, 1], gap="large")
-    with uz_l:
-        pass  # left col reserved for future preview
+        col_btn, col_clr = st.columns([3, 1])
+        with col_btn:
+            analyse = st.button("🔬 ANALYSE FORM", type="primary",
+                                use_container_width=True, key="u_analyse")
+        with col_clr:
+            if st.button("✕ Clear", key="u_clear"):
+                for k in ["u_fid","u_bytes","u_name","u_result"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
 
-    with uz_r:
-        if tmp_video_path and Path(tmp_video_path).exists():
-            vid_b64  = base64.b64encode(Path(tmp_video_path).read_bytes()).decode()
-            ex_label = exercise
+        if analyse:
+            ext  = Path(n).suffix or ".mp4"
+            tp   = Path(tempfile.gettempdir()) / f"formate_up{ext}"
+            tp.write_bytes(b)
+            res  = run_pipeline(str(tp), u_exercise, u_camera)
+            if res:
+                st.session_state["u_result"] = res
 
-            upload_movenet_html = """
-<!DOCTYPE html><html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-*{box-sizing:border-box;margin:0;padding:0;}
-body{background:#0D0D12;font-family:Arial,sans-serif;color:#F0EEF8;}
-.wrap{position:relative;background:#06060A;border-radius:14px;overflow:hidden;border:1px solid #1D1D28;}
-video{width:100%;display:block;max-height:400px;object-fit:contain;background:#000;}
-canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
-.bar{display:flex;align-items:center;justify-content:space-between;padding:.5rem .85rem;background:#13131A;border-top:1px solid #1D1D28;gap:.5rem;flex-wrap:wrap;}
-.badge{font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:.25rem .65rem;border-radius:12px;}
-.badge.green{background:rgba(37,99,235,.12);border:1px solid rgba(59,130,246,.3);color:#60A5FA;}
-.badge.loading{background:rgba(90,88,112,.08);border:1px solid #1D1D28;color:#5A5870;}
-.badge.err{background:rgba(30,58,138,.2);border:1px solid rgba(59,130,246,.3);color:#93C5FD;}
-.flags{display:flex;gap:.35rem;flex-wrap:wrap;}
-.flag{font-size:.65rem;font-weight:700;padding:.22rem .6rem;border-radius:10px;}
-.flag.ok  {background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);color:#93C5FD;}
-.flag.warn{background:rgba(255,170,0,.15);border:1px solid rgba(255,170,0,.4);color:#FFD060;}
-.flag.bad {background:rgba(255,68,68,.18);border:1px solid rgba(255,68,68,.45);color:#FF9090;}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <video id="vid" controls playsinline></video>
-  <canvas id="cvs"></canvas>
-</div>
-<div class="bar">
-  <span class="badge loading" id="status-badge">Loading BlazePose...</span>
-  <div class="flags" id="flags-wrap"></div>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
-<script>
-const EXERCISE="EX_PLACEHOLDER";
-const BP={L_SH:11,R_SH:12,L_EL:13,R_EL:14,L_WR:15,R_WR:16,L_HIP:23,R_HIP:24,L_KN:25,R_KN:26,L_AN:27,R_AN:28};
-const CONNS=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
-const KEY_JOINTS={back:[11,12,23,24],drift:[11,12],hinge:[23,24],knee:[25,26],depth:[23,24,25,26],lean:[11,12,23,24]};
+    if st.session_state.get("u_result"):
+        sid, b_sum, g_sum, rep_df, num_reps, gold_dir = st.session_state["u_result"]
+        render_results(sid, gold_dir, b_sum, g_sum, rep_df, num_reps, u_exercise)
 
-function angleDeg(ax,ay,bx,by,cx,cy){
-  const v1x=ax-bx,v1y=ay-by,v2x=cx-bx,v2y=cy-by;
-  const dot=v1x*v2x+v1y*v2y;
-  const mag=Math.sqrt((v1x**2+v1y**2)*(v2x**2+v2y**2))+1e-9;
-  return Math.acos(Math.max(-1,Math.min(1,dot/mag)))*180/Math.PI;
-}
-
-// BlazePose returns normalised 0-1 x,y directly
-function checkThresholds(kp){
-  const xn=i=>kp[i]&&kp[i].score>.4?kp[i].x:null;
-  const yn=i=>kp[i]&&kp[i].score>.4?kp[i].y:null;
-  const ok=(...ids)=>ids.every(i=>xn(i)!==null);
-  const f={};
-  if(EXERCISE==="deadlift"){
-    if(ok(11,23,25)){
-      const a=angleDeg(xn(11),yn(11),xn(23),yn(23),xn(25),yn(25));
-      f.back=a>=145?{st:"ok",lbl:"Back OK"}:a>=115?{st:"warn",lbl:"Back rounding"}:{st:"bad",lbl:"Back round!"};
-    }
-    if(ok(11,23)){const d=Math.abs(xn(11)-xn(23));f.drift=d<.07?{st:"ok",lbl:"Bar path OK"}:d<.14?{st:"warn",lbl:"Bar drifting"}:{st:"bad",lbl:"Bar too far!"};}
-    if(ok(23,25)){const d=yn(25)-yn(23);f.hinge=d>.03?{st:"ok",lbl:"Good hinge"}:{st:"warn",lbl:"Hinge deeper"};}
-  } else {
-    if(ok(23,25)){const c=xn(25)-xn(23);f.knee=c>=-.02?{st:"ok",lbl:"Knees OK"}:c>=-.07?{st:"warn",lbl:"Knee caving"}:{st:"bad",lbl:"Knee cave!"};}
-    if(ok(23,25)){const d=yn(23)-yn(25);f.depth=d<=.03?{st:"ok",lbl:"Good depth"}:d<=.12?{st:"warn",lbl:"Go deeper"}:{st:"bad",lbl:"Too shallow"};}
-    if(ok(11,23)){const l=Math.abs(xn(11)-xn(23));f.lean=l<.07?{st:"ok",lbl:"Upright OK"}:l<.14?{st:"warn",lbl:"Leaning fwd"}:{st:"bad",lbl:"Too much lean!"};}
-  }
-  return f;
-}
-
-function jointColor(idx,flags){
-  let w="ok";
-  for(const[k,jts] of Object.entries(KEY_JOINTS)){
-    if(!flags[k]||!jts.includes(idx))continue;
-    if(flags[k].st==="bad")return"#FF4444";
-    if(flags[k].st==="warn")w="warn";
-  }
-  return w==="warn"?"#FFAA00":"#3B82F6";
-}
-
-function drawSkeleton(ctx,kp,flags,W,H){
-  const px=i=>kp[i].x*W, py=i=>kp[i].y*H, vs=i=>kp[i]?kp[i].score:0;
-  const sts=Object.values(flags).map(f=>f.st);
-  const cc=sts.includes("bad")?"#FF4444":sts.includes("warn")?"#FFAA00":"#3B82F6";
-  ctx.lineWidth=3; ctx.lineCap="round";
-  for(const[a,b] of CONNS){
-    if(vs(a)<.3||vs(b)<.3)continue;
-    ctx.globalAlpha=.9;ctx.strokeStyle=cc;
-    ctx.beginPath();ctx.moveTo(px(a),py(a));ctx.lineTo(px(b),py(b));ctx.stroke();
-  }
-  ctx.globalAlpha=1;
-  for(let i=0;i<kp.length;i++){
-    if(vs(i)<.3)continue;
-    ctx.beginPath();ctx.arc(px(i),py(i),7,0,2*Math.PI);
-    ctx.fillStyle=jointColor(i,flags);ctx.fill();
-    ctx.strokeStyle="rgba(0,0,0,.7)";ctx.lineWidth=2;ctx.stroke();
-  }
-  let yo=30;ctx.font="bold 14px Arial,sans-serif";ctx.globalAlpha=1;
-  for(const[k,{st,lbl}] of Object.entries(flags)){
-    if(st==="ok")continue;
-    const col=st==="bad"?"#FF4444":"#FFAA00";
-    const tw=ctx.measureText(lbl).width;
-    ctx.fillStyle="rgba(0,0,0,.8)";ctx.fillRect(10,yo-16,tw+18,24);
-    ctx.fillStyle=col;ctx.fillText(lbl,19,yo);yo+=30;
-  }
-}
-
-function renderChips(flags){
-  document.getElementById("flags-wrap").innerHTML=Object.values(flags).map(({st,lbl})=>
-    '<span class="flag '+st+'">'+(st==="ok"?"✓":"▲")+" "+lbl+"</span>"
-  ).join("");
-}
-
-const vid=document.getElementById("vid");
-const cvs=document.getElementById("cvs");
-const ctx=cvs.getContext("2d");
-let detector=null,rafId=null;
-
-const b64="VID_B64_PLACEHOLDER";
-const blob=new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))],{type:"video/mp4"});
-vid.src=URL.createObjectURL(blob);
-
-async function init(){
-  try{
-    detector=await poseDetection.createDetector(
-      poseDetection.SupportedModels.BlazePose,
-      {runtime:"tfjs",modelType:"lite",enableSmoothing:true}
-    );
-    document.getElementById("status-badge").textContent="BlazePose Ready ✓";
-    document.getElementById("status-badge").className="badge green";
-    vid.addEventListener("play",startLoop);
-    vid.addEventListener("pause",()=>cancelAnimationFrame(rafId));
-    vid.addEventListener("ended",()=>cancelAnimationFrame(rafId));
-  }catch(e){
-    document.getElementById("status-badge").textContent="Error: "+e.message;
-    document.getElementById("status-badge").className="badge err";
-  }
-}
-
-function startLoop(){
-  async function loop(){
-    if(vid.paused||vid.ended)return;
-    const W=vid.videoWidth||640,H=vid.videoHeight||480;
-    cvs.width=W;cvs.height=H;
-    // Match canvas CSS size to actual rendered video box
-    const r=vid.getBoundingClientRect();
-    cvs.style.width=r.width+"px";cvs.style.height=r.height+"px";
-    ctx.clearRect(0,0,W,H);
-    try{
-      const poses=await detector.estimatePoses(vid,{flipHorizontal:false});
-      if(poses.length>0){
-        const kp=poses[0].keypoints;
-        const flags=checkThresholds(kp);
-        drawSkeleton(ctx,kp,flags,W,H);
-        renderChips(flags);
-      }
-    }catch(e){}
-    rafId=requestAnimationFrame(loop);
-  }
-  loop();
-}
-init();
-</script>
-</body></html>""".replace("EX_PLACEHOLDER", ex_label).replace("VID_B64_PLACEHOLDER", vid_b64)
-
-
-            st.markdown('<p class="lbl">MoveNet Preview</p>', unsafe_allow_html=True)
-            components.html(upload_movenet_html, height=480, scrolling=False)
-
-        else:
-            st.markdown(
-                '<div class="empty-state" style="padding:3rem 0;">'
-                '<div class="empty-logo"><b>FORM</b><span>ate</span></div>'
-                '<p class="empty-txt">Upload a video to begin analysis.</p>'
-                '</div>',
-                unsafe_allow_html=True
-            )
-
-    # ── Debug state ───────────────────────────────────────────────
-    with st.expander("🔍 Debug info", expanded=False):
-        st.write("uploaded:", uploaded.name if uploaded else None)
-        st.write("file_id in state:", st.session_state.get("upload_file_id"))
-        st.write("tmp_video_path:", tmp_video_path)
-        st.write("tmp file exists:", Path(tmp_video_path).exists() if tmp_video_path else False)
-        st.write("tmp file size:", Path(tmp_video_path).stat().st_size if tmp_video_path and Path(tmp_video_path).exists() else 0)
-        st.write("upload_results:", st.session_state.get("upload_results") is not None)
-        st.write("ROOT:", str(ROOT))
-        st.write("pipeline scripts exist:", {
-            "bronze": (ROOT / "pipeline_bronze_extract.py").exists(),
-            "silver": (ROOT / "pipeline_silver_transform.py").exists(),
-            "gold":   (ROOT / "pipeline_gold_score.py").exists(),
-        })
-
-    if tmp_video_path and Path(tmp_video_path).exists():
-        if st.button("ANALYSE FORM", type="primary", use_container_width=True, key="run_upload"):
-            result = run_pipeline(tmp_video_path, exercise, camera_view)
-            if result:
-                st.session_state.upload_results = result
-    elif tmp_video_path:
-        st.error(f"File not found on disk: `{tmp_video_path}` — please re-upload.")
-    else:
-        st.info("Upload a video above, then click Analyse Form.")
-
-    if st.session_state.upload_results:
-        sid, b_sum, g_sum, rep_df, num_reps, gold_dir = st.session_state.upload_results
-        render_results(sid, gold_dir, b_sum, g_sum, rep_df, num_reps, exercise)
-
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ════════════════════════════════════════════
 # TAB 2 — LIVE TRAINER
@@ -2478,7 +2284,7 @@ function saveSession(){
     if not st.session_state.live_results:
         live_upload = st.file_uploader(
             "Session video will appear here automatically after stopping — or upload manually",
-            type=["mp4","mov","webm"],
+            type=["video/mp4","video/quicktime","video/webm","mp4","mov","webm"],
             key="live_video_upload",
             label_visibility="visible"
         )
