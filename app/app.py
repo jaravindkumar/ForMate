@@ -1130,11 +1130,30 @@ init();
                 unsafe_allow_html=True
             )
 
+    # ── Debug state ───────────────────────────────────────────────
+    with st.expander("🔍 Debug info", expanded=False):
+        st.write("uploaded:", uploaded.name if uploaded else None)
+        st.write("file_id in state:", st.session_state.get("upload_file_id"))
+        st.write("tmp_video_path:", tmp_video_path)
+        st.write("tmp file exists:", Path(tmp_video_path).exists() if tmp_video_path else False)
+        st.write("tmp file size:", Path(tmp_video_path).stat().st_size if tmp_video_path and Path(tmp_video_path).exists() else 0)
+        st.write("upload_results:", st.session_state.get("upload_results") is not None)
+        st.write("ROOT:", str(ROOT))
+        st.write("pipeline scripts exist:", {
+            "bronze": (ROOT / "pipeline_bronze_extract.py").exists(),
+            "silver": (ROOT / "pipeline_silver_transform.py").exists(),
+            "gold":   (ROOT / "pipeline_gold_score.py").exists(),
+        })
+
     if tmp_video_path and Path(tmp_video_path).exists():
         if st.button("ANALYSE FORM", type="primary", use_container_width=True, key="run_upload"):
             result = run_pipeline(tmp_video_path, exercise, camera_view)
             if result:
                 st.session_state.upload_results = result
+    elif tmp_video_path:
+        st.error(f"File not found on disk: `{tmp_video_path}` — please re-upload.")
+    else:
+        st.info("Upload a video above, then click Analyse Form.")
 
     if st.session_state.upload_results:
         sid, b_sum, g_sum, rep_df, num_reps, gold_dir = st.session_state.upload_results
