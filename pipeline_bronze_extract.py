@@ -1,7 +1,7 @@
 """
-pipeline_bronze_extract.py — MediaPipe Tasks API (mediapipe >= 0.10)
+pipeline_bronze_extract.py — MediaPipe pose extraction + overlay generation
 """
-import os, json, time, shutil, urllib.request, subprocess
+import os, json, time, shutil, urllib.request, subprocess, math
 from datetime import datetime, timezone
 from pathlib import Path
 import cv2
@@ -10,10 +10,19 @@ import numpy as np
 MODEL_URL  = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
 MODEL_NAME = "pose_landmarker_lite.task"
 
-YOLO17_TO_BP33 = {0:0,1:2,2:5,3:7,4:8,5:11,6:12,7:13,8:14,9:15,10:16,11:23,12:24,13:25,14:26,15:27,16:28}
+# MediaPipe landmark indices
+MP_CONNECTIONS = [
+    (11,12),(11,13),(13,15),(12,14),(14,16),   # arms
+    (11,23),(12,24),(23,24),                    # torso
+    (23,25),(25,27),(24,26),(26,28),            # legs
+    (27,29),(27,31),(28,30),(28,32),            # feet
+]
 
-
-# ── Model download ─────────────────────────────────────────────────
+# Colour palette
+COL_OK    = (56, 189, 96)    # green  BGR
+COL_WARN  = (60, 165, 248)   # amber  BGR
+COL_BAD   = (68,  68, 239)   # red    BGR
+COL_BONE  = (200, 200, 200)  # grey
 
 def _find_model():
     here = Path(__file__).resolve().parent
@@ -26,85 +35,150 @@ def _download_model():
     dst = Path("/tmp") / MODEL_NAME
     if dst.exists() and dst.stat().st_size > 100_000:
         return dst
-    print(f"[bronze] Downloading model...")
+    print("[bronze] Downloading pose model…")
     urllib.request.urlretrieve(MODEL_URL, str(dst))
-    print(f"[bronze] Downloaded ({dst.stat().st_size//1024} KB)")
     return dst
 
 def _get_model_path():
     return _find_model() or _download_model()
 
-
-# ── Video opening — returns a valid readable PATH (not cap) ────────
-
-def _ensure_readable(video_path: str) -> str:
-    """
-    Return a path that OpenCV can read frame-by-frame.
-    If the file can't be opened directly, convert via ffmpeg.
-    Always returns a fresh path — never a half-read cap object.
-    """
+def _ensure_readable(video_path):
     path = str(video_path)
-
-    # Quick check: can opencv open it and read at least one frame?
-    def cv_readable(p):
+    def cv_ok(p):
         try:
             cap = cv2.VideoCapture(p, cv2.CAP_FFMPEG)
-            if not cap.isOpened():
-                cap.release()
-                return False
-            ok, _ = cap.read()
-            cap.release()
-            return ok
-        except Exception:
-            return False
+            ok, _ = cap.read(); cap.release(); return ok
+        except: return False
 
-    if cv_readable(path):
-        print(f"[bronze] OpenCV can read directly: {path}")
+    if cv_ok(path):
         return path
 
-    # Try ffmpeg conversion → /tmp/formate_converted.mp4
-    print(f"[bronze] OpenCV cannot read {Path(path).name} — converting via ffmpeg...")
-    converted = Path("/tmp") / "formate_converted.mp4"
-    try:
-        ret = subprocess.run(
-            ["ffmpeg", "-y", "-i", path,
-             "-c:v", "libx264", "-preset", "ultrafast",
-             "-pix_fmt", "yuv420p",
-             "-an",        # no audio
-             str(converted)],
-            capture_output=True, timeout=180
-        )
-        if ret.returncode == 0 and converted.exists() and converted.stat().st_size > 1000:
-            if cv_readable(str(converted)):
-                print(f"[bronze] ffmpeg OK → {converted} ({converted.stat().st_size//1024} KB)")
-                return str(converted)
+    print(f"[bronze] Converting {Path(path).name} via ffmpeg…")
+    out = Path("/tmp") / "formate_converted.mp4"
+    ret = subprocess.run([
+        "ffmpeg","-y","-i",path,
+        "-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-an",
+        str(out)], capture_output=True, timeout=300)
+    if ret.returncode == 0 and cv_ok(str(out)):
+        print(f"[bronze] Converted OK ({out.stat().st_size//1024} KB)")
+        return str(out)
+
+    diag = ret.stderr.decode()[-800:]
+    raise RuntimeError(f"Cannot read video.\nffmpeg: {diag}")
+
+
+# ── Per-frame form checks (returns list of (joint_idx, severity)) ──
+def _check_form(lms, exercise, W, H):
+    """
+    Returns dict: landmark_index -> 'ok'|'warn'|'bad'
+    Uses MediaPipe normalised coords (0-1).
+    """
+    if not lms:
+        return {}
+
+    def pt(idx):
+        lm = lms.get(idx)
+        if lm is None: return None
+        return lm["x"], lm["y"], lm.get("vis", 0)
+
+    def angle(ax,ay, bx,by, cx,cy):
+        v1x,v1y = ax-bx, ay-by
+        v2x,v2y = cx-bx, cy-by
+        dot = v1x*v2x + v1y*v2y
+        mag = (math.sqrt(v1x**2+v1y**2)+1e-9)*(math.sqrt(v2x**2+v2y**2)+1e-9)
+        return math.degrees(math.acos(max(-1,min(1,dot/mag))))
+
+    flags = {}  # landmark_idx -> severity
+
+    def flag(idxs, sev):
+        for i in idxs:
+            flags[i] = sev
+
+    ls = pt(11); rs = pt(12)
+    lh = pt(23); rh = pt(24)
+    lk = pt(25); rk = pt(26)
+    la = pt(27); ra = pt(28)
+    lw = pt(15); rw = pt(16)
+
+    if exercise == "deadlift" or exercise in ("romanian_deadlift","dumbbell_deadlift"):
+        # Back angle: shoulder-hip-knee — warn <120 bad <100
+        if ls and lh and lk and ls[2]>.3 and lh[2]>.3 and lk[2]>.3:
+            a = angle(ls[0],ls[1], lh[0],lh[1], lk[0],lk[1])
+            sev = "ok" if a>=120 else ("warn" if a>=100 else "bad")
+            flag([11,12,23,24], sev)
+        # Knee cave: knees closer than feet
+        if lk and rk and la and ra:
+            knee_w = abs(lk[0]-rk[0])
+            foot_w = abs(la[0]-ra[0])
+            if knee_w < foot_w * 0.7:
+                flag([25,26,27,28], "warn")
+
+    elif exercise == "squat" or "squat" in exercise:
+        # Knee over toe depth
+        if lk and la and lk[2]>.3 and la[2]>.3:
+            # knee forward of ankle by more than 30% of leg length
+            leg_len = abs(lk[1] - la[1]) + 1e-9
+            forward = lk[0] - la[0]
+            ratio = forward / leg_len
+            sev = "ok" if ratio < 0.25 else ("warn" if ratio < 0.45 else "bad")
+            flag([25,26,27,28], sev)
+        # Depth: hip below knee
+        if lh and lk and lh[2]>.3 and lk[2]>.3:
+            if lh[1] >= lk[1]:  # hip Y >= knee Y = parallel or below
+                flag([23,24], "ok")
             else:
-                print("[bronze] ffmpeg converted but still unreadable")
-        print("[bronze] ffmpeg stderr:", ret.stderr.decode()[-600:])
-    except Exception as e:
-        print(f"[bronze] ffmpeg exception: {e}")
+                flag([23,24], "warn")
 
-    # Diagnostic
-    try:
-        probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_streams", "-of", "json", path],
-            capture_output=True, timeout=30
-        )
-        diag = probe.stdout.decode()[:500] or probe.stderr.decode()[:500]
-    except Exception:
-        diag = "ffprobe unavailable"
+    elif "press" in exercise or "shoulder" in exercise:
+        # Wrist above elbow in press
+        le = pt(13); re = pt(14)
+        if lw and le and lw[2]>.3 and le[2]>.3:
+            sev = "ok" if lw[1] < le[1] else "warn"
+            flag([13,14,15,16], sev)
 
-    raise RuntimeError(
-        f"Cannot read video: {Path(path).name}\n"
-        f"Size: {Path(path).stat().st_size} bytes\n"
-        f"ffprobe: {diag}\n"
-        "Try re-recording or converting to .mp4 with H.264."
-    )
+    elif "row" in exercise or "curl" in exercise:
+        # Elbow tracking: elbow stays close to torso
+        le = pt(13); re = pt(14)
+        if le and ls and le[2]>.3 and ls[2]>.3:
+            dist = abs(le[0] - ls[0])
+            sev = "ok" if dist < 0.15 else ("warn" if dist < 0.25 else "bad")
+            flag([13,14,15,16], sev)
+
+    return flags
 
 
-# ── Pose runners ───────────────────────────────────────────────────
+# ── Draw skeleton on frame ─────────────────────────────────────────
+def _draw_skeleton(frame, lms, flags, W, H):
+    if not lms:
+        return frame
+    frame = frame.copy()
 
-def _run_mediapipe(video_path, fps, model_path, out_jsonl, session_id):
+    def px(idx):
+        lm = lms.get(idx)
+        if lm is None or lm.get("vis",0) < 0.2: return None
+        return int(lm["x"]*W), int(lm["y"]*H)
+
+    # Draw bones
+    for a, b in MP_CONNECTIONS:
+        pa, pb = px(a), px(b)
+        if pa and pb:
+            cv2.line(frame, pa, pb, COL_BONE, 2, cv2.LINE_AA)
+
+    # Draw joints coloured by flag severity
+    for idx in range(33):
+        p = px(idx)
+        if p is None: continue
+        sev = flags.get(idx, "ok")
+        col = COL_OK if sev == "ok" else (COL_WARN if sev == "warn" else COL_BAD)
+        cv2.circle(frame, p, 5, col, -1, cv2.LINE_AA)
+        cv2.circle(frame, p, 6, (0,0,0), 1, cv2.LINE_AA)
+
+    return frame
+
+
+# ── Main pose runner ───────────────────────────────────────────────
+def _run_mediapipe(video_path, fps, model_path, out_jsonl, session_id,
+                   exercise, overlay_path=None):
     from mediapipe.tasks.python.vision import PoseLandmarker, PoseLandmarkerOptions, RunningMode
     from mediapipe.tasks.python.core.base_options import BaseOptions
     import mediapipe as mp
@@ -112,176 +186,158 @@ def _run_mediapipe(video_path, fps, model_path, out_jsonl, session_id):
     opts = PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=str(model_path)),
         running_mode=RunningMode.VIDEO, num_poses=1,
-        min_pose_detection_confidence=0.4,
-        min_pose_presence_confidence=0.4,
-        min_tracking_confidence=0.4,
+        min_pose_detection_confidence=0.35,
+        min_pose_presence_confidence=0.35,
+        min_tracking_confidence=0.35,
     )
-    frame_idx = detected = 0
-    cap = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
 
-    with PoseLandmarker.create_from_options(opts) as lmk, out_jsonl.open("w") as f:
+    cap   = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
+    W     = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)  or 640)
+    H     = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
+    fps_v = float(cap.get(cv2.CAP_PROP_FPS) or fps)
+
+    # Video writer for overlay
+    writer = None
+    if overlay_path:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(overlay_path), fourcc, fps_v, (W, H))
+
+    frame_idx = detected = 0
+    with PoseLandmarker.create_from_options(opts) as lmk, open(out_jsonl, "w") as f:
         while True:
             ok, frame = cap.read()
-            if not ok:
-                break
+            if not ok: break
+
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            ts_ms = int(frame_idx * 1000 / max(fps, 1))
-            res = lmk.detect_for_video(img, ts_ms)
+            ts_ms = int(frame_idx * 1000 / max(fps_v, 1))
+            res   = lmk.detect_for_video(img, ts_ms)
+
             found = bool(res.pose_landmarks)
-            lms = [{"id":i,"x":0.0,"y":0.0,"z":0.0,"vis":0.0} for i in range(33)]
+            lms   = [{"id":i,"x":0.,"y":0.,"z":0.,"vis":0.} for i in range(33)]
+            lms_d = {}
+
             if found:
                 detected += 1
                 for i, lm in enumerate(res.pose_landmarks[0]):
                     if i < 33:
-                        lms[i] = {"id":i,"x":float(lm.x),"y":float(lm.y),
-                                  "z":float(lm.z),"vis":float(lm.visibility)}
+                        lms[i]   = {"id":i,"x":float(lm.x),"y":float(lm.y),
+                                    "z":float(lm.z),"vis":float(lm.visibility)}
+                        lms_d[i] = lms[i]
+
             f.write(json.dumps({
                 "session_id": session_id, "frame_idx": frame_idx,
-                "t_sec": float(frame_idx / max(fps, 1)),
+                "t_sec": float(frame_idx/max(fps_v,1)),
                 "pose_detected": found, "landmarks": lms
             }) + "\n")
+
+            # Write overlay frame
+            if writer:
+                if found:
+                    flags = _check_form(lms_d, exercise, W, H)
+                    frame = _draw_skeleton(frame, lms_d, flags, W, H)
+                    # Frame counter HUD
+                    cv2.rectangle(frame, (8,8), (180,32), (0,0,0), -1)
+                    cv2.putText(frame, f"Frame {frame_idx} | Pose OK", (12,26),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                else:
+                    cv2.rectangle(frame, (8,8), (200,32), (0,0,0), -1)
+                    cv2.putText(frame, f"Frame {frame_idx} | No pose", (12,26),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100,100,100), 1)
+                writer.write(frame)
+
             frame_idx += 1
 
     cap.release()
+    if writer:
+        writer.release()
     return frame_idx, detected
 
-
-def _try_yolo():
-    try:
-        from ultralytics import YOLO
-        return YOLO("yolov8n-pose.pt")
-    except Exception:
-        return None
-
-def _run_yolo(video_path, fps, yolo, out_jsonl, session_id):
-    cap = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
-    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 640)
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
-    frame_idx = detected = 0
-    with out_jsonl.open("w") as f:
-        while True:
-            ok, frame = cap.read()
-            if not ok: break
-            res = yolo(frame, verbose=False)
-            lms = [{"id":i,"x":0.0,"y":0.0,"z":0.0,"vis":0.0} for i in range(33)]
-            found = False
-            r = res[0]
-            if r.keypoints is not None:
-                kps = r.keypoints.data
-                if kps is not None and kps.shape[0] > 0:
-                    best = int(kps[:,:,2].mean(dim=1).argmax())
-                    kp = kps[best]
-                    for yi,bi in YOLO17_TO_BP33.items():
-                        x,y,c = float(kp[yi,0]),float(kp[yi,1]),float(kp[yi,2])
-                        lms[bi] = {"id":bi,"x":x/max(width,1),"y":y/max(height,1),"z":0.0,"vis":c}
-                        if c > 0.3: found = True
-            if found: detected += 1
-            f.write(json.dumps({
-                "session_id":session_id,"frame_idx":frame_idx,
-                "t_sec":float(frame_idx/max(fps,1)),
-                "pose_detected":found,"landmarks":lms
-            })+"\n")
-            frame_idx += 1
-    cap.release()
-    return frame_idx, detected
-
-
-# ── Utilities ──────────────────────────────────────────────────────
 
 def utc_now_iso():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00","Z")
+    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
 
 def make_session_id(exercise):
     return datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + exercise
 
 
-# ── Main entry point ───────────────────────────────────────────────
-
+# ── Entry point ────────────────────────────────────────────────────
 def extract_bronze(video_path, out_root="pipeline/bronze", exercise="deadlift",
-                   camera_view="front_oblique", write_overlay=False, model_dir=None):
+                   camera_view="front_oblique", write_overlay=True, model_dir=None):
 
     video_path = str(os.path.abspath(video_path))
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
 
     sz = Path(video_path).stat().st_size
+    if sz < 1000:
+        raise RuntimeError(f"Video too small ({sz} bytes)")
     print(f"[bronze] Input: {video_path} ({sz} bytes)")
 
-    if sz < 1000:
-        raise RuntimeError(f"Video file too small ({sz} bytes) — upload may have failed.")
+    readable = _ensure_readable(video_path)
 
-    # Ensure OpenCV can read it (converts via ffmpeg if needed)
-    readable_path = _ensure_readable(video_path)
-
-    # Get video properties from the readable file
-    cap = cv2.VideoCapture(str(readable_path), cv2.CAP_FFMPEG)
+    cap     = cv2.VideoCapture(str(readable), cv2.CAP_FFMPEG)
     fps     = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
-    width   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)  or 640)
-    height  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
+    W       = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)  or 640)
+    H       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
     nframes = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)  or 0)
-    cap.release()  # ALWAYS release before passing path to runners
-    print(f"[bronze] {width}x{height} @ {fps:.1f}fps ~{nframes} frames")
+    cap.release()
+    print(f"[bronze] {W}x{H} @ {fps:.1f}fps ~{nframes} frames")
 
     session_id = make_session_id(exercise)
-    out_dir = Path(out_root) / session_id
+    out_dir    = Path(out_root) / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy readable file to session dir
     input_copy = out_dir / "input.mp4"
-    shutil.copy2(readable_path, str(input_copy))
+    shutil.copy2(readable, str(input_copy))
 
-    out_jsonl = out_dir / "keypoints.jsonl"
+    out_jsonl    = out_dir / "keypoints.jsonl"
+    overlay_path = (out_dir / "overlay.mp4") if write_overlay else None
+
     t0 = time.time()
-
-    yolo = _try_yolo()
-    if yolo:
-        model_name = "yolov8n-pose"
-        frame_idx, detected = _run_yolo(str(input_copy), fps, yolo, out_jsonl, session_id)
-    else:
-        model_name = "mediapipe-pose-landmarker-lite"
-        model_path = _get_model_path()
-        frame_idx, detected = _run_mediapipe(str(input_copy), fps, model_path, out_jsonl, session_id)
-
+    model_path = _get_model_path()
+    frame_idx, detected = _run_mediapipe(
+        str(input_copy), fps, model_path, out_jsonl, session_id,
+        exercise, overlay_path=overlay_path
+    )
     elapsed = time.time() - t0
-    print(f"[bronze] Done: {frame_idx} frames, {detected} with pose ({elapsed:.1f}s)")
 
     if frame_idx == 0:
-        raise RuntimeError(
-            f"No frames read from {Path(readable_path).name}.\n"
-            f"ffmpeg converted: {readable_path != video_path}\n"
-            f"input_copy size: {input_copy.stat().st_size if input_copy.exists() else 0}"
-        )
+        raise RuntimeError("No frames extracted from video.")
+
+    # Convert overlay to H264 for browser compatibility
+    final_overlay = None
+    if overlay_path and overlay_path.exists() and overlay_path.stat().st_size > 1000:
+        h264_overlay = out_dir / "overlay_h264.mp4"
+        ret = subprocess.run([
+            "ffmpeg","-y","-i", str(overlay_path),
+            "-c:v","libx264","-preset","fast","-pix_fmt","yuv420p",
+            str(h264_overlay)], capture_output=True, timeout=300)
+        if ret.returncode == 0 and h264_overlay.exists():
+            final_overlay = str(h264_overlay)
+            overlay_path.unlink(missing_ok=True)
+        else:
+            final_overlay = str(overlay_path)
+    
+    print(f"[bronze] {frame_idx} frames, {detected} pose detected ({elapsed:.1f}s)")
 
     meta = {
-        "session_id":session_id, "exercise":exercise, "camera_view":camera_view,
-        "input_video":str(input_copy), "source_video_path":video_path,
-        "fps":fps, "width":width, "height":height, "num_frames":nframes,
-        "created_utc":utc_now_iso(), "model":model_name
+        "session_id": session_id, "exercise": exercise, "camera_view": camera_view,
+        "input_video": str(input_copy), "fps": fps, "width": W, "height": H,
+        "num_frames": nframes, "created_utc": utc_now_iso(), "model": "mediapipe-lite"
     }
     (out_dir/"meta.json").write_text(json.dumps(meta, indent=2))
 
     summary = {
-        "session_id":session_id, "model_used":model_name,
-        "frames_processed":frame_idx, "pose_detected_frames":detected,
-        "pose_detected_ratio":float(detected/max(frame_idx,1)),
-        "elapsed_sec":float(elapsed),
-        "outputs":{
-            "session_dir":str(out_dir), "meta":str(out_dir/"meta.json"),
-            "input_copy":str(input_copy), "keypoints_jsonl":str(out_jsonl),
-            "overlay_mp4":None
+        "session_id": session_id, "model_used": "mediapipe-lite",
+        "frames_processed": frame_idx, "pose_detected_frames": detected,
+        "pose_detected_ratio": float(detected/max(frame_idx,1)),
+        "elapsed_sec": float(elapsed),
+        "outputs": {
+            "session_dir": str(out_dir), "meta": str(out_dir/"meta.json"),
+            "input_copy": str(input_copy), "keypoints_jsonl": str(out_jsonl),
+            "overlay_mp4": final_overlay
         }
     }
     (out_dir/"summary.json").write_text(json.dumps(summary, indent=2))
     return session_id
-
-
-if __name__ == "__main__":
-    import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--video", required=True)
-    ap.add_argument("--exercise", default="deadlift")
-    ap.add_argument("--out_root", default="pipeline/bronze")
-    ap.add_argument("--camera_view", default="front_oblique")
-    args = ap.parse_args()
-    extract_bronze(args.video, args.out_root, args.exercise, args.camera_view)
