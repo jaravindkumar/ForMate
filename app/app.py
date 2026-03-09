@@ -776,9 +776,46 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
                 for a,b in MP_CONN:
                     pa,pb = px(a),px(b)
                     if pa and pb: cv2.line(frame,pa,pb,COL_BONE,2,cv2.LINE_AA)
-                # Colour joints by form check
-                from pipeline_bronze_extract import _check_form as _cf
-                try: flags = _cf(lms_d, exercise_name, fW, fH)
+                # Colour joints by form check (inlined)
+                def _check_form_inline(lms, ex, W, H):
+                    import math as _m
+                    if not lms: return {}
+                    def pt(i):
+                        lm = lms.get(i)
+                        return (float(lm["x"]), float(lm["y"]), float(lm.get("vis",0))) if lm else None
+                    def ang(ax,ay,bx,by,cx,cy):
+                        v1x,v1y=ax-bx,ay-by; v2x,v2y=cx-bx,cy-by
+                        dot=v1x*v2x+v1y*v2y
+                        mag=(_m.sqrt(v1x**2+v1y**2)+1e-9)*(_m.sqrt(v2x**2+v2y**2)+1e-9)
+                        return _m.degrees(_m.acos(max(-1,min(1,dot/mag))))
+                    flags = {}
+                    def flag(idxs, sev):
+                        for i in idxs: flags[i] = sev
+                    ls=pt(11);rs=pt(12);lh=pt(23);rh=pt(24)
+                    lk=pt(25);rk=pt(26);la=pt(27);ra=pt(28)
+                    lw=pt(15);rw=pt(16);le=pt(13);re=pt(14)
+                    if ex in ("deadlift","romanian_deadlift","dumbbell_deadlift","bent_over_row","single_arm_row"):
+                        if ls and lh and lk and ls[2]>.3 and lh[2]>.3 and lk[2]>.3:
+                            a=ang(ls[0],ls[1],lh[0],lh[1],lk[0],lk[1])
+                            flag([11,12,23,24],"ok" if a>=120 else ("warn" if a>=100 else "bad"))
+                        if lk and rk and la and ra:
+                            kw=abs(lk[0]-rk[0]); fw=abs(la[0]-ra[0])
+                            if kw < fw*0.7: flag([25,26,27,28],"warn")
+                    elif "squat" in ex or ex=="squat":
+                        if lk and la and lk[2]>.3 and la[2]>.3:
+                            ll=abs(lk[1]-la[1])+1e-9; r=(lk[0]-la[0])/ll
+                            flag([25,26,27,28],"ok" if r<0.25 else ("warn" if r<0.45 else "bad"))
+                        if lh and lk and lh[2]>.3 and lk[2]>.3:
+                            flag([23,24],"ok" if lh[1]>=lk[1] else "warn")
+                    elif "press" in ex or "shoulder" in ex:
+                        if lw and le and lw[2]>.3 and le[2]>.3:
+                            flag([13,14,15,16],"ok" if lw[1]<le[1] else "warn")
+                    elif "row" in ex or "curl" in ex:
+                        if le and ls and le[2]>.3 and ls[2]>.3:
+                            d=abs(le[0]-ls[0])
+                            flag([13,14,15,16],"ok" if d<0.15 else ("warn" if d<0.25 else "bad"))
+                    return flags
+                try: flags = _check_form_inline(lms_d, exercise_name, fW, fH)
                 except: flags = {}
                 for i in range(33):
                     p = px(i)
