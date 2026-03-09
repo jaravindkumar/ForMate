@@ -736,7 +736,11 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
             b_meta        = read_json(ROOT / "pipeline" / "bronze" / session_id / "meta.json")
             snapshots_dir = gold_dir / "snapshots"
             snapshots_dir.mkdir(exist_ok=True)
-            cap = cv2.VideoCapture(b_meta["input_video"])
+            # Always use input_copy (always .mp4 after bronze conversion)
+            vid_for_snap = b_meta.get("input_video", "")
+            if not vid_for_snap or not Path(vid_for_snap).exists():
+                vid_for_snap = str(ROOT / "pipeline" / "bronze" / session_id / "input.mp4")
+            cap = cv2.VideoCapture(str(vid_for_snap), cv2.CAP_FFMPEG)
             for issue in issues:
                 for fi in issue["frames"][:3]:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, fi)
@@ -1300,6 +1304,10 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
       </svg>
     </button>
     <button id="btn-main" class="start" onclick="toggleCamera()">START CAMERA</button>
+    <div id="shake-hint" style="display:none;font-size:.62rem;color:rgba(255,255,255,.35);
+         text-align:center;padding:.2rem 0;letter-spacing:.05em">
+      SHAKE HEAD TO STOP
+    </div>
     <button id="btn-voice" class="icon-btn" onclick="toggleVoice()" title="Voice feedback">
       <svg id="voice-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
@@ -1762,6 +1770,49 @@ let repStart=0,peakY=0,standY=null,botY=null,calibN=0;
 let rangeHistory=[];
 let wakeLock=null;
 
+// ── Head-shake stop detection ─────────────────────────────────────
+// Track nose X to detect 2 quick left-right swings → stop session
+let noseXHist=[],lastNosePeak=null,shakeCount=0,lastShakeT=0;
+const SHAKE_THRESHOLD=0.06; // min normalised swing to count
+const SHAKE_WINDOW_MS=1800; // both shakes must complete in 1.8s
+const SHAKES_NEEDED=2;      // left-right = 1, right-left = 1 → done
+
+function checkHeadShake(kp, vW){
+  const nose=kp[MV.NOSE];
+  if(!nose||nose.score<.4) return false;
+  const nx=nose.x/vW;
+  noseXHist.push({x:nx,t:Date.now()});
+  if(noseXHist.length>30) noseXHist.shift(); // ~2s at 15fps
+  if(noseXHist.length<6) return false;
+
+  // Detect direction reversal (local peak/trough)
+  const n=noseXHist.length;
+  const prev=noseXHist[n-3].x, cur=noseXHist[n-1].x, mid=noseXHist[n-2].x;
+  const isPeak   = mid>prev+SHAKE_THRESHOLD && mid>cur+SHAKE_THRESHOLD;
+  const isTrough = mid<prev-SHAKE_THRESHOLD && mid<cur-SHAKE_THRESHOLD;
+
+  if(isPeak||isTrough){
+    const now=Date.now();
+    // Only count if different direction from last peak
+    const sameDir = lastNosePeak===null? false :
+      (isPeak && lastNosePeak==="peak")||(isTrough && lastNosePeak==="trough");
+    if(!sameDir){
+      if(now-lastShakeT < SHAKE_WINDOW_MS){
+        shakeCount++;
+      } else {
+        shakeCount=1;
+      }
+      lastShakeT=now;
+      lastNosePeak=isPeak?"peak":"trough";
+      if(shakeCount>=SHAKES_NEEDED){
+        shakeCount=0; lastNosePeak=null; noseXHist=[];
+        return true; // SHAKE DETECTED
+      }
+    }
+  }
+  return false;
+}
+
 // ── Gesture-to-start system ───────────────────────────────────────
 // User must raise both wrists above shoulders for GESTURE_HOLD frames
 // before rep counting begins. This prevents accidental early starts.
@@ -1807,11 +1858,28 @@ function startCountdown(){
       gestureHoldCount=0;
       repCount=0;hipHist=[];repState="IDLE";
       calibN=0;standY=null;botY=null;rangeHistory=[];peakY=0;
+      noseXHist=[];shakeCount=0;lastNosePeak=null;lastShakeT=0;
       document.getElementById("rep-num").textContent="0";
       document.getElementById("rep-num").style.color="#60A5FA";
       setStatus("active");
       speak("Go!");
       hideGestureOverlay();
+      // Start recording CLEAN video (no overlay) from the camera stream
+      recordedChunks=[];
+      try{
+        const vid=document.getElementById("video");
+        const rawStream=vid.srcObject;
+        const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+          ?"video/webm;codecs=vp9":"video/webm";
+        mediaRecorder=new MediaRecorder(rawStream,
+          {mimeType, videoBitsPerSecond:4000000});
+        mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recordedChunks.push(e.data);};
+        mediaRecorder.start(500);
+        console.log("[FORMate] Recording started (clean video)");
+      }catch(err){
+        console.warn("[FORMate] MediaRecorder failed:",err);
+        mediaRecorder=null;
+      }
       // Restore ring wrap for next time
       const rw=document.getElementById("gesture-ring-wrap");
       const gs=document.getElementById("gesture-sub");
@@ -1947,6 +2015,8 @@ function updateRep(kp, vW, vH){
 
 
 function setStatus(s){
+  const sh=document.getElementById("shake-hint");
+  if(sh) sh.style.display=(s==="active")?"block":"none";
   const el=document.getElementById("status-badge");
   const m={
     off:     ["OFF",""],
@@ -2019,6 +2089,12 @@ async function detect(){
         const lh=kp[MV.L_HIP],rh=kp[MV.R_HIP];
         if(lh&&rh&&lh.score>.3&&rh.score>.3)
           updateRep(kp, vW, vH);
+
+        // ── Head shake = stop session ─────────────────────────────
+        if(checkHeadShake(kp, vW)){
+          stopSession();
+          return;
+        }
       }
 
       // Recording composite: video frame behind skeleton
@@ -2171,16 +2247,9 @@ async function toggleCamera(){
       // Preload voices and greet
       window.speechSynthesis.getVoices();
       setTimeout(()=>speak("Raise both hands when you're ready to start."), 600);
-      // Start recording the canvas overlay stream
-      const canvas=document.getElementById("overlay");
-      const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-        ?"video/webm;codecs=vp9":"video/webm";
-      try{
-        mediaRecorder=new MediaRecorder(canvas.captureStream(15),
-          {mimeType,videoBitsPerSecond:2000000});
-        mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recordedChunks.push(e.data);};
-        mediaRecorder.start(500);
-      }catch(err){console.warn("MediaRecorder:",err);mediaRecorder=null;}
+      // MediaRecorder started in startCountdown() when workout actually begins
+      // (not here — avoids recording the gesture/countdown phase)
+      mediaRecorder=null; recordedChunks=[];
       detect();
     }catch(e){
       btn.textContent="START CAMERA";btn.className="start";btn.disabled=false;
@@ -2193,40 +2262,67 @@ async function toggleCamera(){
       }
     },{once:false});
   }else{
-    running=false;cancelAnimationFrame(rafId);
-    if(stream)stream.getTracks().forEach(t=>t.stop());
-    // Release wake lock
-    if(wakeLock){try{await wakeLock.release();}catch(e){}wakeLock=null;}
-    // Reset gesture
-    repActive=false;gestureHoldCount=0;countdownActive=false;
-    hideGestureOverlay();
-    document.getElementById("cam-off").style.display="flex";
-    document.getElementById("fps-badge").style.display="none";
-    document.getElementById("btn-flip").style.display="none";
-    btn.textContent="START CAMERA";btn.className="start";
-    setStatus("done");
-    window.speechSynthesis.cancel();
-    clearTimeout(voiceQueue);
-    lastFlagState={};flagHoldCount={};lastRepSpoken=0;
-    setTimeout(()=>speak(repCount+" reps. Session done."),300);
-    // Stop recording and auto-download the annotated video
-    if(mediaRecorder&&mediaRecorder.state!=="inactive"){
-      mediaRecorder.onstop=()=>{
-        const blob=new Blob(recordedChunks,{type:"video/webm"});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement("a");
-        a.href=url;a.download="formate_live_session_"+repCount+"reps.webm";
-        document.body.appendChild(a);a.click();
-        document.body.removeChild(a);
-        setTimeout(()=>URL.revokeObjectURL(url),1000);
-        // Show save button as fallback
-        document.getElementById("btn-save").style.display="inline-block";
-      };
-      mediaRecorder.stop();
-    }else{
-      if(sessionFrames.length>5)
-        document.getElementById("btn-save").style.display="inline-block";
-    }
+    stopSession();
+  }
+}
+
+async function stopSession(){
+  if(!running) return;
+  running=false;
+  cancelAnimationFrame(rafId);
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  if(wakeLock){try{await wakeLock.release();}catch(e){}wakeLock=null;}
+
+  repActive=false;gestureHoldCount=0;countdownActive=false;
+  noseXHist=[];shakeCount=0;
+  hideGestureOverlay();
+
+  const btn=document.getElementById("btn-main");
+  document.getElementById("cam-off").style.display="flex";
+  document.getElementById("fps-badge").style.display="none";
+  document.getElementById("btn-flip").style.display="none";
+  btn.textContent="START CAMERA"; btn.className="start";
+  setStatus("done");
+
+  // ── "Workout ended" announcement ─────────────────────────────
+  window.speechSynthesis.cancel();
+  clearTimeout(voiceQueue);
+  lastFlagState={};flagHoldCount={};lastRepSpoken=0;
+  const msg = repCount > 0
+    ? "Workout ended. " + repCount + " reps completed. Great work!"
+    : "Workout ended.";
+  setTimeout(()=>speak(msg), 300);
+
+  // ── Show "WORKOUT ENDED" banner on overlay ────────────────────
+  const canvas=document.getElementById("overlay");
+  const ctx=canvas.getContext("2d");
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="rgba(0,0,0,0.55)";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#60A5FA";
+  ctx.font="bold 28px Inter,system-ui";
+  ctx.textAlign="center";
+  ctx.fillText("WORKOUT ENDED", canvas.width/2, canvas.height/2 - 20);
+  ctx.fillStyle="#F0EEF8";
+  ctx.font="18px Inter,system-ui";
+  ctx.fillText(repCount + " reps completed", canvas.width/2, canvas.height/2 + 16);
+  ctx.textAlign="left";
+
+  // ── Stop recording and trigger download ──────────────────────
+  if(mediaRecorder && mediaRecorder.state!=="inactive"){
+    mediaRecorder.onstop=()=>{
+      if(recordedChunks.length===0) return;
+      const blob=new Blob(recordedChunks,{type:"video/webm"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;
+      a.download="formate_live_session_"+repCount+"reps.webm";
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url),2000);
+      document.getElementById("btn-save").style.display="inline-block";
+    };
+    mediaRecorder.stop();
   }
 }
 
