@@ -932,27 +932,13 @@ with tab_upload:
         unsafe_allow_html=True
     )
 
-    # ── Exercise & camera selectors (in-tab copies) ───────────────
-    uc1, uc2 = st.columns(2)
-    with uc1:
-        st.markdown('<p class="lbl">Exercise</p>', unsafe_allow_html=True)
-        u_exercise = st.selectbox("Exercise", [
-            "deadlift","squat","romanian_deadlift","goblet_squat","sumo_squat",
-            "bulgarian_split_squat","shoulder_press","floor_press","lateral_raise",
-            "bent_over_row","bicep_curl","single_arm_row","dumbbell_swing",
-            "russian_twist","renegade_row",
-        ], format_func=lambda x: x.replace("_"," ").title(),
-           key="u_exercise", label_visibility="collapsed")
-    with uc2:
-        st.markdown('<p class="lbl">Camera Angle</p>', unsafe_allow_html=True)
-        u_camera = st.selectbox("Camera Angle", ["front_oblique","side"],
-           key="u_camera", label_visibility="collapsed")
-
-    # ── Simple Streamlit file uploader ────────────────────────────
+    # ── File uploader ─────────────────────────────────────────────
+    st.caption("📹 Supported: MP4, MOV, M4V, WebM, MKV, AVI, 3GP, TS, FLV")
     uploaded = st.file_uploader(
-        "📁 Choose a video file",
-        type=["video/mp4","video/quicktime","video/x-m4v","video/webm","mp4","mov","m4v","webm"],
-        key="u_file"
+        "Choose a video file",
+        type=["mp4","mov","m4v","webm","mkv","avi","3gp","ts","flv","wmv","mpeg","mpg"],
+        key="u_file",
+        label_visibility="collapsed"
     )
 
     if uploaded is not None:
@@ -984,16 +970,22 @@ with tab_upload:
                 st.rerun()
 
         if analyse:
-            ext  = Path(n).suffix or ".mp4"
-            tp   = Path(tempfile.gettempdir()) / f"formate_up{ext}"
+            raw_suffix = Path(n).suffix.lower()
+            # Force .mp4 extension for formats ffmpeg will transcode anyway
+            # Keep original ext so bronze knows what it's dealing with
+            ext = raw_suffix if raw_suffix in {
+                ".mp4",".mov",".m4v",".webm",".mkv",".avi",
+                ".3gp",".ts",".flv",".wmv",".mpeg",".mpg"
+            } else ".mp4"
+            tp = Path(tempfile.gettempdir()) / f"formate_up{ext}"
             tp.write_bytes(b)
-            res  = run_pipeline(str(tp), u_exercise, u_camera)
+            res = run_pipeline(str(tp), exercise, camera_view)
             if res:
                 st.session_state["u_result"] = res
 
     if st.session_state.get("u_result"):
         sid, b_sum, g_sum, rep_df, num_reps, gold_dir = st.session_state["u_result"]
-        render_results(sid, gold_dir, b_sum, g_sum, rep_df, num_reps, u_exercise)
+        render_results(sid, gold_dir, b_sum, g_sum, rep_df, num_reps, exercise)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
