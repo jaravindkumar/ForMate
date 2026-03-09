@@ -767,11 +767,18 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
                 for issue in issues:
                     with st.expander(issue["type"].replace("_"," ").title()):
                         st.caption(issue["description"])
-                        ic = st.columns(min(len(issue["frames"]), 3))
-                        for i, fi in enumerate(issue["frames"][:3]):
-                            ip = snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")
-                            if ip.exists():
-                                ic[i].image(str(ip), use_container_width=True, caption="Frame " + str(fi))
+                        saved_snaps = [
+                            snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")
+                            for fi in issue["frames"][:6]
+                            if (snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")).exists()
+                        ][:3]
+                        if saved_snaps:
+                            ic = st.columns(len(saved_snaps))
+                            for i, ip in enumerate(saved_snaps):
+                                ic[i].image(str(ip), use_container_width=True,
+                                            caption="Frame " + ip.stem.split("_")[-1])
+                        else:
+                            st.caption("No snapshot frames available.")
                 st.markdown('</div>', unsafe_allow_html=True)
         except Exception:
             pass
@@ -842,7 +849,7 @@ def run_pipeline(tmp_video, exercise, camera_view):
         # ── GOLD ──────────────────────────────────────────────────
         with st.status("Step 3/3 — Scoring form…", expanded=True) as s3:
             gold     = load_module("pipeline_gold_score")
-            gold.run_gold(session_id=session_id, exercise=exercise)
+            gold.run_gold(session_id=session_id, exercise=exercise, root=str(ROOT))
             gold_dir = ROOT / "pipeline" / "gold" / session_id
             g_sum    = read_json(gold_dir / "summary.json")
             rep_df   = pd.read_csv(gold_dir / "metrics_reps.csv")
@@ -2432,7 +2439,7 @@ function saveSession(){
     if not st.session_state.live_results:
         live_upload = st.file_uploader(
             "Session video will appear here automatically after stopping — or upload manually",
-            type=["video/mp4","video/quicktime","video/webm","mp4","mov","webm"],
+            type=["mp4","mov","m4v","webm","mkv","avi","3gp","ts","flv","wmv"],
             key="live_video_upload",
             label_visibility="visible"
         )
