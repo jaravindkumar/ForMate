@@ -741,12 +741,24 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
             if not vid_for_snap or not Path(vid_for_snap).exists():
                 vid_for_snap = str(ROOT / "pipeline" / "bronze" / session_id / "input.mp4")
             cap = cv2.VideoCapture(str(vid_for_snap), cv2.CAP_FFMPEG)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+            guard_start  = int(total_frames * 0.08)   # skip first 8%
+            guard_end    = int(total_frames * 0.92)   # skip last 8%
             for issue in issues:
-                for fi in issue["frames"][:3]:
+                saved = 0
+                for fi in issue["frames"][:6]:  # check more candidates
+                    if fi < guard_start or fi > guard_end:
+                        continue  # skip setup/teardown frames
                     cap.set(cv2.CAP_PROP_POS_FRAMES, fi)
                     ret, frame = cap.read()
-                    if ret:
+                    if ret and frame is not None:
+                        # Quick brightness check — skip near-black frames
+                        if frame.mean() < 12:
+                            continue
                         cv2.imwrite(str(snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")), frame)
+                        saved += 1
+                        if saved >= 3:
+                            break
             cap.release()
             snap_col, _ = st.columns([1, 1], gap="medium")
             with snap_col:
@@ -1306,7 +1318,7 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
     <button id="btn-main" class="start" onclick="toggleCamera()">START CAMERA</button>
     <div id="shake-hint" style="display:none;font-size:.62rem;color:rgba(255,255,255,.35);
          text-align:center;padding:.2rem 0;letter-spacing:.05em">
-      SHAKE HEAD TO STOP
+      👈 SHAKE HEAD LEFT-RIGHT TO STOP 👉
     </div>
     <button id="btn-voice" class="icon-btn" onclick="toggleVoice()" title="Voice feedback">
       <svg id="voice-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1771,46 +1783,94 @@ let rangeHistory=[];
 let wakeLock=null;
 
 // ── Head-shake stop detection ─────────────────────────────────────
-// Track nose X to detect 2 quick left-right swings → stop session
-let noseXHist=[],lastNosePeak=null,shakeCount=0,lastShakeT=0;
-const SHAKE_THRESHOLD=0.06; // min normalised swing to count
-const SHAKE_WINDOW_MS=1800; // both shakes must complete in 1.8s
-const SHAKES_NEEDED=2;      // left-right = 1, right-left = 1 → done
+// Simple approach: track running nose X, detect crossings of a centre
+// line in alternating directions. 3 crossings = 1.5 shakes = done.
+//
+// "Crossing" = nose X moves from one side of the face-centre to other
+// by at least SHAKE_MIN normalised width. At 15fps this is very stable.
+
+let shakeNoseHist=[];   // {x, t} ring buffer, normalised 0-1
+let shakeSide=null;     // last confirmed side: "L" or "R"
+let shakeCrossings=0;   // alternating L→R or R→L crossings
+let shakeWindowStart=0; // timestamp of first crossing in current sequence
+const SHAKE_MIN=0.08;   // nose must move 8% of frame width per direction
+const SHAKE_WINDOW=2500;// all crossings must happen within 2.5s
+const SHAKE_CROSSES=3;  // 3 crossings = done (L→R→L or R→L→R)
+
+// Show visual countdown when shake is in progress
+let shakeProgress=0;
 
 function checkHeadShake(kp, vW){
   const nose=kp[MV.NOSE];
-  if(!nose||nose.score<.4) return false;
-  const nx=nose.x/vW;
-  noseXHist.push({x:nx,t:Date.now()});
-  if(noseXHist.length>30) noseXHist.shift(); // ~2s at 15fps
-  if(noseXHist.length<6) return false;
+  if(!nose || nose.score<0.35) return false;
 
-  // Detect direction reversal (local peak/trough)
-  const n=noseXHist.length;
-  const prev=noseXHist[n-3].x, cur=noseXHist[n-1].x, mid=noseXHist[n-2].x;
-  const isPeak   = mid>prev+SHAKE_THRESHOLD && mid>cur+SHAKE_THRESHOLD;
-  const isTrough = mid<prev-SHAKE_THRESHOLD && mid<cur-SHAKE_THRESHOLD;
+  const nx = nose.x / vW;         // normalise to 0–1
+  const now = Date.now();
 
-  if(isPeak||isTrough){
-    const now=Date.now();
-    // Only count if different direction from last peak
-    const sameDir = lastNosePeak===null? false :
-      (isPeak && lastNosePeak==="peak")||(isTrough && lastNosePeak==="trough");
-    if(!sameDir){
-      if(now-lastShakeT < SHAKE_WINDOW_MS){
-        shakeCount++;
-      } else {
-        shakeCount=1;
+  shakeNoseHist.push({x:nx, t:now});
+  if(shakeNoseHist.length > 45) shakeNoseHist.shift(); // 3s window
+
+  // Need at least 10 frames to compute a stable mean
+  if(shakeNoseHist.length < 10) return false;
+
+  // Face centre = mean of recent nose positions
+  const centre = shakeNoseHist.reduce((s,p)=>s+p.x,0) / shakeNoseHist.length;
+
+  // Current side of centre
+  const side = nx < centre - SHAKE_MIN ? "L" :
+               nx > centre + SHAKE_MIN ? "R" : null;
+
+  if(side && side !== shakeSide){
+    // Crossed to the other side
+    if(shakeSide === null){
+      // First detection — start sequence
+      shakeSide = side;
+      shakeCrossings = 1;
+      shakeWindowStart = now;
+    } else if(now - shakeWindowStart < SHAKE_WINDOW){
+      shakeSide = side;
+      shakeCrossings++;
+      shakeProgress = shakeCrossings / SHAKE_CROSSES;
+      if(shakeCrossings >= SHAKE_CROSSES){
+        // CONFIRMED — reset and fire
+        shakeNoseHist=[]; shakeSide=null; shakeCrossings=0; shakeProgress=0;
+        return true;
       }
-      lastShakeT=now;
-      lastNosePeak=isPeak?"peak":"trough";
-      if(shakeCount>=SHAKES_NEEDED){
-        shakeCount=0; lastNosePeak=null; noseXHist=[];
-        return true; // SHAKE DETECTED
-      }
+    } else {
+      // Timed out — restart
+      shakeSide = side;
+      shakeCrossings = 1;
+      shakeWindowStart = now;
+      shakeProgress = 1/SHAKE_CROSSES;
     }
   }
+
+  // Draw progress arc on canvas as visual feedback
+  _drawShakeProgress(shakeProgress);
   return false;
+}
+
+function _drawShakeProgress(pct){
+  if(pct <= 0) return;
+  const canvas=document.getElementById("overlay");
+  if(!canvas) return;
+  const ctx=canvas.getContext("2d");
+  const cx=canvas.width/2, cy=40, r=18;
+  ctx.save();
+  ctx.strokeStyle="rgba(255,255,255,0.25)";
+  ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  ctx.strokeStyle="#60A5FA";
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);
+  ctx.stroke();
+  ctx.fillStyle="rgba(255,255,255,0.7)";
+  ctx.font="bold 9px Inter,system-ui";
+  ctx.textAlign="center";
+  ctx.fillText("STOP",cx,cy+3);
+  ctx.textAlign="left";
+  ctx.restore();
 }
 
 // ── Gesture-to-start system ───────────────────────────────────────
@@ -1858,11 +1918,11 @@ function startCountdown(){
       gestureHoldCount=0;
       repCount=0;hipHist=[];repState="IDLE";
       calibN=0;standY=null;botY=null;rangeHistory=[];peakY=0;
-      noseXHist=[];shakeCount=0;lastNosePeak=null;lastShakeT=0;
+      shakeNoseHist=[];shakeSide=null;shakeCrossings=0;shakeProgress=0;shakeWindowStart=0;
       document.getElementById("rep-num").textContent="0";
       document.getElementById("rep-num").style.color="#60A5FA";
       setStatus("active");
-      speak("Go!");
+      speak("Go! Shake your head to stop.");
       hideGestureOverlay();
       // Start recording CLEAN video (no overlay) from the camera stream
       recordedChunks=[];
@@ -2274,7 +2334,7 @@ async function stopSession(){
   if(wakeLock){try{await wakeLock.release();}catch(e){}wakeLock=null;}
 
   repActive=false;gestureHoldCount=0;countdownActive=false;
-  noseXHist=[];shakeCount=0;
+  shakeNoseHist=[];shakeSide=null;shakeCrossings=0;shakeProgress=0;
   hideGestureOverlay();
 
   const btn=document.getElementById("btn-main");
