@@ -46,9 +46,10 @@ def segment_squat_reps(df: pd.DataFrame) -> pd.DataFrame:
 
     values = sig.to_numpy()
     dt = np.median(np.diff(df["t_sec"])) if len(df) > 5 else (1.0 / 30.0)
-    fps = 1.0 / dt if dt > 0 else 30.0
+    dt = float(dt) if (dt and np.isfinite(dt) and dt > 0) else (1.0 / 30.0)
+    fps = min(1.0 / dt, 120.0)  # cap at 120fps — guards against dt≈0
 
-    min_sep = int(0.8 * fps)  # min 0.8s between reps
+    min_sep = max(4, int(0.8 * fps))  # min 4 frames always
 
     peak_thr   = np.nanpercentile(values, 75)   # near bottom of squat
     trough_thr = np.nanpercentile(values, 35)   # near top / standing
@@ -129,10 +130,11 @@ def segment_deadlift_reps(df: pd.DataFrame) -> pd.DataFrame:
 
     values = sig.to_numpy()
     dt = np.median(np.diff(df["t_sec"])) if len(df) > 5 else (1.0 / 30.0)
-    fps = 1.0 / dt if dt > 0 else 30.0
+    dt = float(dt) if (dt and np.isfinite(dt) and dt > 0) else (1.0 / 30.0)
+    fps = min(1.0 / dt, 120.0)  # cap at 120fps
 
-    min_sep_trough = int(1.0 * fps)
-    min_sep_peak = int(1.0 * fps)
+    min_sep_trough = max(4, int(1.0 * fps))
+    min_sep_peak   = max(4, int(1.0 * fps))
 
     peak_thr = np.nanpercentile(values, 80)
     trough_thr = np.nanpercentile(values, 40)

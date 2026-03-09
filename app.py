@@ -736,13 +736,29 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
             b_meta        = read_json(ROOT / "pipeline" / "bronze" / session_id / "meta.json")
             snapshots_dir = gold_dir / "snapshots"
             snapshots_dir.mkdir(exist_ok=True)
-            cap = cv2.VideoCapture(b_meta["input_video"])
+            # Always use input_copy (always .mp4 after bronze conversion)
+            vid_for_snap = b_meta.get("input_video", "")
+            if not vid_for_snap or not Path(vid_for_snap).exists():
+                vid_for_snap = str(ROOT / "pipeline" / "bronze" / session_id / "input.mp4")
+            cap = cv2.VideoCapture(str(vid_for_snap), cv2.CAP_FFMPEG)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+            guard_start  = int(total_frames * 0.08)   # skip first 8%
+            guard_end    = int(total_frames * 0.92)   # skip last 8%
             for issue in issues:
-                for fi in issue["frames"][:3]:
+                saved = 0
+                for fi in issue["frames"][:6]:  # check more candidates
+                    if fi < guard_start or fi > guard_end:
+                        continue  # skip setup/teardown frames
                     cap.set(cv2.CAP_PROP_POS_FRAMES, fi)
                     ret, frame = cap.read()
-                    if ret:
+                    if ret and frame is not None:
+                        # Quick brightness check — skip near-black frames
+                        if frame.mean() < 12:
+                            continue
                         cv2.imwrite(str(snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")), frame)
+                        saved += 1
+                        if saved >= 3:
+                            break
             cap.release()
             snap_col, _ = st.columns([1, 1], gap="medium")
             with snap_col:
@@ -751,11 +767,18 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
                 for issue in issues:
                     with st.expander(issue["type"].replace("_"," ").title()):
                         st.caption(issue["description"])
-                        ic = st.columns(min(len(issue["frames"]), 3))
-                        for i, fi in enumerate(issue["frames"][:3]):
-                            ip = snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")
-                            if ip.exists():
-                                ic[i].image(str(ip), use_container_width=True, caption="Frame " + str(fi))
+                        saved_snaps = [
+                            snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")
+                            for fi in issue["frames"][:6]
+                            if (snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")).exists()
+                        ][:3]
+                        if saved_snaps:
+                            ic = st.columns(len(saved_snaps))
+                            for i, ip in enumerate(saved_snaps):
+                                ic[i].image(str(ip), use_container_width=True,
+                                            caption="Frame " + ip.stem.split("_")[-1])
+                        else:
+                            st.caption("No snapshot frames available.")
                 st.markdown('</div>', unsafe_allow_html=True)
         except Exception:
             pass
@@ -826,7 +849,7 @@ def run_pipeline(tmp_video, exercise, camera_view):
         # ── GOLD ──────────────────────────────────────────────────
         with st.status("Step 3/3 — Scoring form…", expanded=True) as s3:
             gold     = load_module("pipeline_gold_score")
-            gold.run_gold(session_id=session_id, exercise=exercise)
+            gold.run_gold(session_id=session_id, exercise=exercise, root=str(ROOT))
             gold_dir = ROOT / "pipeline" / "gold" / session_id
             g_sum    = read_json(gold_dir / "summary.json")
             rep_df   = pd.read_csv(gold_dir / "metrics_reps.csv")
@@ -916,27 +939,13 @@ with tab_upload:
         unsafe_allow_html=True
     )
 
-    # ── Exercise & camera selectors (in-tab copies) ───────────────
-    uc1, uc2 = st.columns(2)
-    with uc1:
-        st.markdown('<p class="lbl">Exercise</p>', unsafe_allow_html=True)
-        u_exercise = st.selectbox("Exercise", [
-            "deadlift","squat","romanian_deadlift","goblet_squat","sumo_squat",
-            "bulgarian_split_squat","shoulder_press","floor_press","lateral_raise",
-            "bent_over_row","bicep_curl","single_arm_row","dumbbell_swing",
-            "russian_twist","renegade_row",
-        ], format_func=lambda x: x.replace("_"," ").title(),
-           key="u_exercise", label_visibility="collapsed")
-    with uc2:
-        st.markdown('<p class="lbl">Camera Angle</p>', unsafe_allow_html=True)
-        u_camera = st.selectbox("Camera Angle", ["front_oblique","side"],
-           key="u_camera", label_visibility="collapsed")
-
-    # ── Simple Streamlit file uploader ────────────────────────────
+    # ── File uploader ─────────────────────────────────────────────
+    st.caption("📹 Supported: MP4, MOV, M4V, WebM, MKV, AVI, 3GP, TS, FLV")
     uploaded = st.file_uploader(
-        "📁 Choose a video file",
-        type=["video/mp4","video/quicktime","video/x-m4v","video/webm","mp4","mov","m4v","webm"],
-        key="u_file"
+        "Choose a video file",
+        type=["mp4","mov","m4v","webm","mkv","avi","3gp","ts","flv","wmv","mpeg","mpg"],
+        key="u_file",
+        label_visibility="collapsed"
     )
 
     if uploaded is not None:
@@ -968,16 +977,22 @@ with tab_upload:
                 st.rerun()
 
         if analyse:
-            ext  = Path(n).suffix or ".mp4"
-            tp   = Path(tempfile.gettempdir()) / f"formate_up{ext}"
+            raw_suffix = Path(n).suffix.lower()
+            # Force .mp4 extension for formats ffmpeg will transcode anyway
+            # Keep original ext so bronze knows what it's dealing with
+            ext = raw_suffix if raw_suffix in {
+                ".mp4",".mov",".m4v",".webm",".mkv",".avi",
+                ".3gp",".ts",".flv",".wmv",".mpeg",".mpg"
+            } else ".mp4"
+            tp = Path(tempfile.gettempdir()) / f"formate_up{ext}"
             tp.write_bytes(b)
-            res  = run_pipeline(str(tp), u_exercise, u_camera)
+            res = run_pipeline(str(tp), exercise, camera_view)
             if res:
                 st.session_state["u_result"] = res
 
     if st.session_state.get("u_result"):
         sid, b_sum, g_sum, rep_df, num_reps, gold_dir = st.session_state["u_result"]
-        render_results(sid, gold_dir, b_sum, g_sum, rep_df, num_reps, u_exercise)
+        render_results(sid, gold_dir, b_sum, g_sum, rep_df, num_reps, exercise)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1300,6 +1315,10 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
       </svg>
     </button>
     <button id="btn-main" class="start" onclick="toggleCamera()">START CAMERA</button>
+    <div id="shake-hint" style="display:none;font-size:.62rem;color:rgba(255,255,255,.35);
+         text-align:center;padding:.2rem 0;letter-spacing:.05em">
+      👈 SHAKE HEAD LEFT-RIGHT TO STOP 👉
+    </div>
     <button id="btn-voice" class="icon-btn" onclick="toggleVoice()" title="Voice feedback">
       <svg id="voice-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
@@ -1762,6 +1781,97 @@ let repStart=0,peakY=0,standY=null,botY=null,calibN=0;
 let rangeHistory=[];
 let wakeLock=null;
 
+// ── Head-shake stop detection ─────────────────────────────────────
+// Simple approach: track running nose X, detect crossings of a centre
+// line in alternating directions. 3 crossings = 1.5 shakes = done.
+//
+// "Crossing" = nose X moves from one side of the face-centre to other
+// by at least SHAKE_MIN normalised width. At 15fps this is very stable.
+
+let shakeNoseHist=[];   // {x, t} ring buffer, normalised 0-1
+let shakeSide=null;     // last confirmed side: "L" or "R"
+let shakeCrossings=0;   // alternating L→R or R→L crossings
+let shakeWindowStart=0; // timestamp of first crossing in current sequence
+const SHAKE_MIN=0.08;   // nose must move 8% of frame width per direction
+const SHAKE_WINDOW=2500;// all crossings must happen within 2.5s
+const SHAKE_CROSSES=3;  // 3 crossings = done (L→R→L or R→L→R)
+
+// Show visual countdown when shake is in progress
+let shakeProgress=0;
+
+function checkHeadShake(kp, vW){
+  const nose=kp[MV.NOSE];
+  if(!nose || nose.score<0.35) return false;
+
+  const nx = nose.x / vW;         // normalise to 0–1
+  const now = Date.now();
+
+  shakeNoseHist.push({x:nx, t:now});
+  if(shakeNoseHist.length > 45) shakeNoseHist.shift(); // 3s window
+
+  // Need at least 10 frames to compute a stable mean
+  if(shakeNoseHist.length < 10) return false;
+
+  // Face centre = mean of recent nose positions
+  const centre = shakeNoseHist.reduce((s,p)=>s+p.x,0) / shakeNoseHist.length;
+
+  // Current side of centre
+  const side = nx < centre - SHAKE_MIN ? "L" :
+               nx > centre + SHAKE_MIN ? "R" : null;
+
+  if(side && side !== shakeSide){
+    // Crossed to the other side
+    if(shakeSide === null){
+      // First detection — start sequence
+      shakeSide = side;
+      shakeCrossings = 1;
+      shakeWindowStart = now;
+    } else if(now - shakeWindowStart < SHAKE_WINDOW){
+      shakeSide = side;
+      shakeCrossings++;
+      shakeProgress = shakeCrossings / SHAKE_CROSSES;
+      if(shakeCrossings >= SHAKE_CROSSES){
+        // CONFIRMED — reset and fire
+        shakeNoseHist=[]; shakeSide=null; shakeCrossings=0; shakeProgress=0;
+        return true;
+      }
+    } else {
+      // Timed out — restart
+      shakeSide = side;
+      shakeCrossings = 1;
+      shakeWindowStart = now;
+      shakeProgress = 1/SHAKE_CROSSES;
+    }
+  }
+
+  // Draw progress arc on canvas as visual feedback
+  _drawShakeProgress(shakeProgress);
+  return false;
+}
+
+function _drawShakeProgress(pct){
+  if(pct <= 0) return;
+  const canvas=document.getElementById("overlay");
+  if(!canvas) return;
+  const ctx=canvas.getContext("2d");
+  const cx=canvas.width/2, cy=40, r=18;
+  ctx.save();
+  ctx.strokeStyle="rgba(255,255,255,0.25)";
+  ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  ctx.strokeStyle="#60A5FA";
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);
+  ctx.stroke();
+  ctx.fillStyle="rgba(255,255,255,0.7)";
+  ctx.font="bold 9px Inter,system-ui";
+  ctx.textAlign="center";
+  ctx.fillText("STOP",cx,cy+3);
+  ctx.textAlign="left";
+  ctx.restore();
+}
+
 // ── Gesture-to-start system ───────────────────────────────────────
 // User must raise both wrists above shoulders for GESTURE_HOLD frames
 // before rep counting begins. This prevents accidental early starts.
@@ -1807,11 +1917,28 @@ function startCountdown(){
       gestureHoldCount=0;
       repCount=0;hipHist=[];repState="IDLE";
       calibN=0;standY=null;botY=null;rangeHistory=[];peakY=0;
+      shakeNoseHist=[];shakeSide=null;shakeCrossings=0;shakeProgress=0;shakeWindowStart=0;
       document.getElementById("rep-num").textContent="0";
       document.getElementById("rep-num").style.color="#60A5FA";
       setStatus("active");
-      speak("Go!");
+      speak("Go! Shake your head to stop.");
       hideGestureOverlay();
+      // Start recording CLEAN video (no overlay) from the camera stream
+      recordedChunks=[];
+      try{
+        const vid=document.getElementById("video");
+        const rawStream=vid.srcObject;
+        const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+          ?"video/webm;codecs=vp9":"video/webm";
+        mediaRecorder=new MediaRecorder(rawStream,
+          {mimeType, videoBitsPerSecond:4000000});
+        mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recordedChunks.push(e.data);};
+        mediaRecorder.start(500);
+        console.log("[FORMate] Recording started (clean video)");
+      }catch(err){
+        console.warn("[FORMate] MediaRecorder failed:",err);
+        mediaRecorder=null;
+      }
       // Restore ring wrap for next time
       const rw=document.getElementById("gesture-ring-wrap");
       const gs=document.getElementById("gesture-sub");
@@ -1947,6 +2074,8 @@ function updateRep(kp, vW, vH){
 
 
 function setStatus(s){
+  const sh=document.getElementById("shake-hint");
+  if(sh) sh.style.display=(s==="active")?"block":"none";
   const el=document.getElementById("status-badge");
   const m={
     off:     ["OFF",""],
@@ -2019,6 +2148,12 @@ async function detect(){
         const lh=kp[MV.L_HIP],rh=kp[MV.R_HIP];
         if(lh&&rh&&lh.score>.3&&rh.score>.3)
           updateRep(kp, vW, vH);
+
+        // ── Head shake = stop session ─────────────────────────────
+        if(checkHeadShake(kp, vW)){
+          stopSession();
+          return;
+        }
       }
 
       // Recording composite: video frame behind skeleton
@@ -2171,16 +2306,9 @@ async function toggleCamera(){
       // Preload voices and greet
       window.speechSynthesis.getVoices();
       setTimeout(()=>speak("Raise both hands when you're ready to start."), 600);
-      // Start recording the canvas overlay stream
-      const canvas=document.getElementById("overlay");
-      const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-        ?"video/webm;codecs=vp9":"video/webm";
-      try{
-        mediaRecorder=new MediaRecorder(canvas.captureStream(15),
-          {mimeType,videoBitsPerSecond:2000000});
-        mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recordedChunks.push(e.data);};
-        mediaRecorder.start(500);
-      }catch(err){console.warn("MediaRecorder:",err);mediaRecorder=null;}
+      // MediaRecorder started in startCountdown() when workout actually begins
+      // (not here — avoids recording the gesture/countdown phase)
+      mediaRecorder=null; recordedChunks=[];
       detect();
     }catch(e){
       btn.textContent="START CAMERA";btn.className="start";btn.disabled=false;
@@ -2193,40 +2321,67 @@ async function toggleCamera(){
       }
     },{once:false});
   }else{
-    running=false;cancelAnimationFrame(rafId);
-    if(stream)stream.getTracks().forEach(t=>t.stop());
-    // Release wake lock
-    if(wakeLock){try{await wakeLock.release();}catch(e){}wakeLock=null;}
-    // Reset gesture
-    repActive=false;gestureHoldCount=0;countdownActive=false;
-    hideGestureOverlay();
-    document.getElementById("cam-off").style.display="flex";
-    document.getElementById("fps-badge").style.display="none";
-    document.getElementById("btn-flip").style.display="none";
-    btn.textContent="START CAMERA";btn.className="start";
-    setStatus("done");
-    window.speechSynthesis.cancel();
-    clearTimeout(voiceQueue);
-    lastFlagState={};flagHoldCount={};lastRepSpoken=0;
-    setTimeout(()=>speak(repCount+" reps. Session done."),300);
-    // Stop recording and auto-download the annotated video
-    if(mediaRecorder&&mediaRecorder.state!=="inactive"){
-      mediaRecorder.onstop=()=>{
-        const blob=new Blob(recordedChunks,{type:"video/webm"});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement("a");
-        a.href=url;a.download="formate_live_session_"+repCount+"reps.webm";
-        document.body.appendChild(a);a.click();
-        document.body.removeChild(a);
-        setTimeout(()=>URL.revokeObjectURL(url),1000);
-        // Show save button as fallback
-        document.getElementById("btn-save").style.display="inline-block";
-      };
-      mediaRecorder.stop();
-    }else{
-      if(sessionFrames.length>5)
-        document.getElementById("btn-save").style.display="inline-block";
-    }
+    stopSession();
+  }
+}
+
+async function stopSession(){
+  if(!running) return;
+  running=false;
+  cancelAnimationFrame(rafId);
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  if(wakeLock){try{await wakeLock.release();}catch(e){}wakeLock=null;}
+
+  repActive=false;gestureHoldCount=0;countdownActive=false;
+  shakeNoseHist=[];shakeSide=null;shakeCrossings=0;shakeProgress=0;
+  hideGestureOverlay();
+
+  const btn=document.getElementById("btn-main");
+  document.getElementById("cam-off").style.display="flex";
+  document.getElementById("fps-badge").style.display="none";
+  document.getElementById("btn-flip").style.display="none";
+  btn.textContent="START CAMERA"; btn.className="start";
+  setStatus("done");
+
+  // ── "Workout ended" announcement ─────────────────────────────
+  window.speechSynthesis.cancel();
+  clearTimeout(voiceQueue);
+  lastFlagState={};flagHoldCount={};lastRepSpoken=0;
+  const msg = repCount > 0
+    ? "Workout ended. " + repCount + " reps completed. Great work!"
+    : "Workout ended.";
+  setTimeout(()=>speak(msg), 300);
+
+  // ── Show "WORKOUT ENDED" banner on overlay ────────────────────
+  const canvas=document.getElementById("overlay");
+  const ctx=canvas.getContext("2d");
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="rgba(0,0,0,0.55)";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#60A5FA";
+  ctx.font="bold 28px Inter,system-ui";
+  ctx.textAlign="center";
+  ctx.fillText("WORKOUT ENDED", canvas.width/2, canvas.height/2 - 20);
+  ctx.fillStyle="#F0EEF8";
+  ctx.font="18px Inter,system-ui";
+  ctx.fillText(repCount + " reps completed", canvas.width/2, canvas.height/2 + 16);
+  ctx.textAlign="left";
+
+  // ── Stop recording and trigger download ──────────────────────
+  if(mediaRecorder && mediaRecorder.state!=="inactive"){
+    mediaRecorder.onstop=()=>{
+      if(recordedChunks.length===0) return;
+      const blob=new Blob(recordedChunks,{type:"video/webm"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;
+      a.download="formate_live_session_"+repCount+"reps.webm";
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url),2000);
+      document.getElementById("btn-save").style.display="inline-block";
+    };
+    mediaRecorder.stop();
   }
 }
 
@@ -2284,7 +2439,7 @@ function saveSession(){
     if not st.session_state.live_results:
         live_upload = st.file_uploader(
             "Session video will appear here automatically after stopping — or upload manually",
-            type=["video/mp4","video/quicktime","video/webm","mp4","mov","webm"],
+            type=["mp4","mov","m4v","webm","mkv","avi","3gp","ts","flv","wmv"],
             key="live_video_upload",
             label_visibility="visible"
         )
@@ -2298,8 +2453,8 @@ function saveSession(){
             ext = Path(live_upload.name).suffix or ".webm"
 
             with st.spinner("Running pipeline on live session..."):
-                tmp_dir   = Path(tempfile.mkdtemp())
-                tmp_video = tmp_dir / f"live_session{ext}"
+                # Write to stable /tmp path — not mkdtemp (new dir each rerun)
+                tmp_video = Path(tempfile.gettempdir()) / f"formate_live{ext}"
                 live_upload.seek(0)
                 tmp_video.write_bytes(live_upload.read())
                 try:

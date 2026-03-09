@@ -102,13 +102,22 @@ def compute_rep_metrics(df: pd.DataFrame, reps: pd.DataFrame, exercise: str = "d
     return pd.DataFrame(rows)
 
 
-def run_gold(session_id: str, exercise: str = "deadlift") -> dict:
-    silver_dir = Path("pipeline") / "silver" / session_id
+def run_gold(session_id: str, exercise: str = "deadlift", root: str = None) -> dict:
+    # root defaults to cwd (caller must os.chdir(ROOT) before calling)
+    base = Path(root) if root else Path.cwd()
+    silver_dir = base / "pipeline" / "silver" / session_id
     clean_path = silver_dir / "clean.csv"
     reps_path = silver_dir / "reps.csv"
 
     if not clean_path.exists() or not reps_path.exists():
-        raise FileNotFoundError(f"Missing Silver outputs in {silver_dir}")
+        # Fallback: try cwd in case root was wrong
+        fallback = Path.cwd() / "pipeline" / "silver" / session_id
+        if (fallback / "clean.csv").exists():
+            silver_dir = fallback
+            clean_path = silver_dir / "clean.csv"
+            reps_path = silver_dir / "reps.csv"
+        else:
+            raise FileNotFoundError(f"Missing Silver outputs in {silver_dir}")
 
     df = pd.read_csv(clean_path)
     reps = pd.read_csv(reps_path)
@@ -136,7 +145,10 @@ def run_gold(session_id: str, exercise: str = "deadlift") -> dict:
                                      "t_end": float(df["t_sec"].max()), "frames": len(df)}])
         df = df.copy()
         df["rep_id"] = 0
-        df["phase"] = "pull"
+        # Use correct phase vocab per exercise type
+        HINGE_EX_FALLBACK = {"deadlift","romanian_deadlift","dumbbell_deadlift",
+                             "bent_over_row","single_arm_row","dumbbell_swing"}
+        df["phase"] = "pull" if exercise in HINGE_EX_FALLBACK else "descent"
 
     # Rep metrics table
     rep_metrics = compute_rep_metrics(df, reps_valid, exercise=exercise)
@@ -235,7 +247,7 @@ def run_gold(session_id: str, exercise: str = "deadlift") -> dict:
                 "description": "Frames during pull phase of reps with knee-dominant movement."
             })
 
-    gold_dir = Path("pipeline") / "gold" / session_id
+    gold_dir = base / "pipeline" / "gold" / session_id
     gold_dir.mkdir(parents=True, exist_ok=True)
 
     rep_metrics_path = gold_dir / "metrics_reps.csv"
