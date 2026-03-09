@@ -223,28 +223,60 @@ def run_gold(session_id: str, exercise: str = "deadlift", root: str = None) -> d
 
     # Identify problematic frames
     issues = []
-    if trunk_control < 60 and np.isfinite(trunk_p95) and "trunk_angle_deg" in df.columns:
+    if trunk_control < 60 and "trunk_angle_deg" in df.columns:
         # Frames where trunk angle > 25 deg
-        bad_frames = df[df["trunk_angle_deg"] > 25]["frame_idx"].tolist()
+        thr = 25.0
+        if np.isfinite(trunk_p95) and trunk_p95 < 25:
+            thr = trunk_p95 * 0.85  # lower threshold if p95 itself is small
+        bad_mask = df["trunk_angle_deg"].notna() & (df["trunk_angle_deg"] > thr)
+        bad_frames = df[bad_mask]["frame_idx"].tolist()
+        if not bad_frames and "frame_idx" in df.columns:
+            # Fallback: grab frames with highest trunk angle
+            top = df.nlargest(5, "trunk_angle_deg")["frame_idx"].tolist()
+            bad_frames = top
         if bad_frames:
+            # Spread evenly across bad frames
+            step = max(1, len(bad_frames) // 5)
             issues.append({
                 "type": "trunk_instability",
-                "frames": bad_frames[:5],  # limit to 5 snapshots
+                "frames": bad_frames[::step][:5],
                 "description": "Frames where torso angle exceeds 25 degrees, indicating instability."
             })
 
     if hinge_quality < 60 and not rep_metrics.empty:
-        # For reps with low hinge_ratio, find frames in pull phase
-        bad_reps = rep_metrics[rep_metrics["hinge_ratio"] < 0.8]["rep_id"].tolist()
+        # For reps with low hinge_ratio, find frames in pull/descent phase
+        hr = rep_metrics.dropna(subset=["hinge_ratio"])
+        bad_reps = hr[hr["hinge_ratio"] < 0.8]["rep_id"].tolist()
+        # If no explicit bad reps, just grab first rep's active frames
+        if not bad_reps:
+            bad_reps = rep_metrics["rep_id"].tolist()[:2]
         bad_frames = []
-        for rep_id in bad_reps[:2]:  # limit reps
-            pull_frames = df[(df["rep_id"] == rep_id) & (df["phase"] == "pull")]["frame_idx"].tolist()
-            bad_frames.extend(pull_frames[:3])  # 3 frames per rep
+        for rid in bad_reps[:2]:
+            pull_frames = df[
+                (df["rep_id"] == rid) &
+                (df["phase"].isin(["pull","descent"]))
+            ]["frame_idx"].tolist()
+            # Spread across the phase, not just start
+            step = max(1, len(pull_frames) // 3)
+            bad_frames.extend(pull_frames[::step][:3])
         if bad_frames:
             issues.append({
                 "type": "knee_dominant_pull",
                 "frames": bad_frames,
                 "description": "Frames during pull phase of reps with knee-dominant movement."
+            })
+
+    # Always include a sample of active rep frames for snapshot display
+    # (even if no specific issues detected — shows the workout was processed)
+    if "rep_id" in df.columns and "frame_idx" in df.columns:
+        active = df[df["rep_id"] >= 0]
+        if not active.empty:
+            step = max(1, len(active) // 3)
+            sample_frames = active["frame_idx"].tolist()[::step][:3]
+            issues.append({
+                "type": "form_sample",
+                "frames": sample_frames,
+                "description": "Sample frames from your workout session."
             })
 
     gold_dir = base / "pipeline" / "gold" / session_id
