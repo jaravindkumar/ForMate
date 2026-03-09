@@ -746,16 +746,25 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
             guard_end    = int(total_frames * 0.92)   # skip last 8%
             for issue in issues:
                 saved = 0
-                for fi in issue["frames"][:6]:  # check more candidates
-                    if fi < guard_start or fi > guard_end:
-                        continue  # skip setup/teardown frames
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, fi)
+                candidates = issue["frames"][:9]
+                for fi in candidates:
+                    # For form_sample use loose guard; for issues use tight guard
+                    is_sample = issue["type"] == "form_sample"
+                    if not is_sample and (fi < guard_start or fi > guard_end):
+                        continue
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, int(fi))
                     ret, frame = cap.read()
+                    if not ret or frame is None:
+                        # Try sequential read as fallback
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(fi)-1))
+                        _, _ = cap.read()
+                        ret, frame = cap.read()
                     if ret and frame is not None:
-                        # Quick brightness check — skip near-black frames
-                        if frame.mean() < 12:
+                        brightness = float(frame.mean())
+                        if brightness < 8:  # only skip near-black (loosened from 12)
                             continue
-                        cv2.imwrite(str(snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")), frame)
+                        out_path = snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")
+                        cv2.imwrite(str(out_path), frame)
                         saved += 1
                         if saved >= 3:
                             break
@@ -939,6 +948,26 @@ with tab_upload:
         unsafe_allow_html=True
     )
 
+    # ── Debug: show app environment ──────────────────────────────
+    with st.expander("🔧 Debug Info", expanded=False):
+        st.write(f"ROOT: `{ROOT}`")
+        st.write(f"ROOT exists: `{ROOT.exists()}`")
+        st.write(f"Pipeline scripts: `{[p.name for p in ROOT.glob('pipeline_*.py')]}`")
+        st.write(f"tmpdir: `{tempfile.gettempdir()}`")
+        st.write(f"cwd: `{os.getcwd()}`")
+        try:
+            import mediapipe
+            st.write(f"mediapipe: `{mediapipe.__version__}`")
+        except Exception as e:
+            st.write(f"mediapipe import: ❌ `{e}`")
+        try:
+            import cv2 as _cv2
+            st.write(f"opencv: `{_cv2.__version__}`")
+        except Exception as e:
+            st.write(f"opencv import: ❌ `{e}`")
+        ffmpeg_check = subprocess.run(["ffmpeg","-version"], capture_output=True, timeout=5)
+        st.write(f"ffmpeg: `{'OK' if ffmpeg_check.returncode==0 else 'NOT FOUND'}`")
+
     # ── File uploader ─────────────────────────────────────────────
     st.caption("📹 Supported: MP4, MOV, M4V, WebM, MKV, AVI, 3GP, TS, FLV")
     uploaded = st.file_uploader(
@@ -948,15 +977,20 @@ with tab_upload:
         label_visibility="collapsed"
     )
 
+    # ── Debug: show raw uploader state ───────────────────────────
     if uploaded is not None:
-        # Store bytes in session_state immediately — survives reruns
+        st.info(f"📂 Uploader received: `{uploaded.name}` · `{uploaded.size}` bytes · type=`{uploaded.type}`")
         fid = f"{uploaded.name}_{uploaded.size}"
         if st.session_state.get("u_fid") != fid:
             uploaded.seek(0)
-            st.session_state["u_fid"]   = fid
-            st.session_state["u_bytes"] = uploaded.read()
-            st.session_state["u_name"]  = uploaded.name
+            data = uploaded.read()
+            st.session_state["u_fid"]    = fid
+            st.session_state["u_bytes"]  = data
+            st.session_state["u_name"]   = uploaded.name
             st.session_state["u_result"] = None
+            st.info(f"✅ Stored {len(data)//1024} KB in session_state")
+    else:
+        st.caption(f"Uploader state: None  |  session bytes: {len(st.session_state.get('u_bytes') or b'')//1024} KB cached")
 
     b = st.session_state.get("u_bytes")
     n = st.session_state.get("u_name", "video.mp4")
@@ -964,7 +998,10 @@ with tab_upload:
     if b:
         mb = round(len(b)/1024/1024, 1)
         st.success(f"✓ {n}  ({mb} MB) — ready to analyse")
-        st.video(b)
+        try:
+            st.video(b)
+        except Exception as ve:
+            st.warning(f"Preview unavailable: {ve}")
 
         col_btn, col_clr = st.columns([3, 1])
         with col_btn:
@@ -978,17 +1015,24 @@ with tab_upload:
 
         if analyse:
             raw_suffix = Path(n).suffix.lower()
-            # Force .mp4 extension for formats ffmpeg will transcode anyway
-            # Keep original ext so bronze knows what it's dealing with
             ext = raw_suffix if raw_suffix in {
                 ".mp4",".mov",".m4v",".webm",".mkv",".avi",
                 ".3gp",".ts",".flv",".wmv",".mpeg",".mpg"
             } else ".mp4"
             tp = Path(tempfile.gettempdir()) / f"formate_up{ext}"
-            tp.write_bytes(b)
+            st.info(f"▶ Writing {len(b)//1024} KB to `{tp}` then running pipeline…")
+            try:
+                tp.write_bytes(b)
+                st.info(f"✅ Temp file written: `{tp.stat().st_size//1024}` KB")
+            except Exception as we:
+                st.error(f"❌ Could not write temp file: {we}")
+                st.stop()
             res = run_pipeline(str(tp), exercise, camera_view)
             if res:
                 st.session_state["u_result"] = res
+                st.rerun()
+            else:
+                st.error("Pipeline returned None — see errors above ↑")
 
     if st.session_state.get("u_result"):
         sid, b_sum, g_sum, rep_df, num_reps, gold_dir = st.session_state["u_result"]
