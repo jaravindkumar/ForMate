@@ -658,11 +658,18 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
             with open(live_vid, "rb") as vf: st.video(vf.read())
         else:
             ovp   = b_sum["outputs"].get("overlay_mp4") if b_sum else None
-            opath = Path(ovp) if ovp else None
-            if opath and opath.exists():
-                with open(str(opath), "rb") as vf: st.video(vf.read())
+            opath = Path(ovp) if (ovp and ovp != "None" and ovp != "null") else None
+            if opath and opath.exists() and opath.stat().st_size > 1000:
+                st.video(str(opath))
             else:
-                st.markdown('<div style="padding:2rem;text-align:center;color:#1D1D28;font-size:.85rem;">Overlay not available</div>', unsafe_allow_html=True)
+                # Try fallback path
+                fb = ROOT / "pipeline" / "bronze" / session_id / "overlay_h264.mp4"
+                if not fb.exists():
+                    fb = ROOT / "pipeline" / "bronze" / session_id / "overlay.mp4"
+                if fb.exists() and fb.stat().st_size > 1000:
+                    st.video(str(fb))
+                else:
+                    st.markdown('<div style="padding:1.5rem;text-align:center;color:var(--sub);font-size:.85rem;">Overlay generating… refresh after analysis.</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     with row1_r:
@@ -733,70 +740,110 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
 
     if issues and b_sum:
         try:
+            import math as _math
             b_meta        = read_json(ROOT / "pipeline" / "bronze" / session_id / "meta.json")
             snapshots_dir = gold_dir / "snapshots"
             snapshots_dir.mkdir(exist_ok=True)
-            # Always use input_copy (always .mp4 after bronze conversion)
-            vid_for_snap = b_meta.get("input_video", "")
+            vid_for_snap  = b_meta.get("input_video", "")
             if not vid_for_snap or not Path(vid_for_snap).exists():
                 vid_for_snap = str(ROOT / "pipeline" / "bronze" / session_id / "input.mp4")
+
+            # Load keypoints for overlay drawing
+            kp_path  = ROOT / "pipeline" / "bronze" / session_id / "keypoints.jsonl"
+            kp_index = {}  # frame_idx -> landmarks dict
+            if kp_path.exists():
+                with kp_path.open() as kpf:
+                    for line in kpf:
+                        line = line.strip()
+                        if not line: continue
+                        rec = json.loads(line)
+                        if rec.get("pose_detected"):
+                            kp_index[rec["frame_idx"]] = {lm["id"]: lm for lm in rec["landmarks"]}
+
+            MP_CONN = [(11,12),(11,13),(13,15),(12,14),(14,16),(11,23),(12,24),(23,24),
+                       (23,25),(25,27),(24,26),(26,28)]
+            COL_OK   = (56,189,96);  COL_WARN = (60,165,248);  COL_BAD = (68,68,239)
+            COL_BONE = (180,180,180)
+
+            def draw_on(frame, lms_d, exercise_name):
+                if not lms_d: return frame
+                frame = frame.copy()
+                fH, fW = frame.shape[:2]
+                def px(i):
+                    lm = lms_d.get(i)
+                    if lm is None or lm.get("vis",0)<0.15: return None
+                    return int(lm["x"]*fW), int(lm["y"]*fH)
+                for a,b in MP_CONN:
+                    pa,pb = px(a),px(b)
+                    if pa and pb: cv2.line(frame,pa,pb,COL_BONE,2,cv2.LINE_AA)
+                # Colour joints by form check
+                from pipeline_bronze_extract import _check_form as _cf
+                try: flags = _cf(lms_d, exercise_name, fW, fH)
+                except: flags = {}
+                for i in range(33):
+                    p = px(i)
+                    if not p: continue
+                    sev = flags.get(i,"ok")
+                    col = COL_OK if sev=="ok" else (COL_WARN if sev=="warn" else COL_BAD)
+                    cv2.circle(frame,p,5,col,-1,cv2.LINE_AA)
+                    cv2.circle(frame,p,6,(0,0,0),1,cv2.LINE_AA)
+                return frame
+
             cap = cv2.VideoCapture(str(vid_for_snap), cv2.CAP_FFMPEG)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
-            guard_start  = int(total_frames * 0.08)   # skip first 8%
-            guard_end    = int(total_frames * 0.92)   # skip last 8%
+            total_frames = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 1)
+            guard_s = int(total_frames * 0.05)
+            guard_e = int(total_frames * 0.95)
+
             for issue in issues:
                 saved = 0
-                candidates = issue["frames"][:9]
-                for fi in candidates:
-                    # For form_sample use loose guard; for issues use tight guard
+                for fi in issue["frames"][:9]:
                     is_sample = issue["type"] == "form_sample"
-                    if not is_sample and (fi < guard_start or fi > guard_end):
+                    if not is_sample and not (guard_s <= fi <= guard_e):
                         continue
                     cap.set(cv2.CAP_PROP_POS_FRAMES, int(fi))
                     ret, frame = cap.read()
                     if not ret or frame is None:
-                        # Try sequential read as fallback
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(fi)-1))
-                        _, _ = cap.read()
-                        ret, frame = cap.read()
-                    if ret and frame is not None:
-                        brightness = float(frame.mean())
-                        if brightness < 8:  # only skip near-black (loosened from 12)
-                            continue
-                        out_path = snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")
-                        cv2.imwrite(str(out_path), frame)
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(fi)-2))
+                        cap.read(); ret, frame = cap.read()
+                    if ret and frame is not None and float(frame.mean()) > 6:
+                        lms_d = kp_index.get(fi, {})
+                        annotated = draw_on(frame, lms_d, exercise)
+                        label = issue["type"].upper().replace("_"," ")
+                        cv2.rectangle(annotated,(0,0),(annotated.shape[1],28),(0,0,0),-1)
+                        cv2.putText(annotated, f"{label}  frame {fi}",
+                                    (8,20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1)
+                        out_p = snapshots_dir / f"{issue['type']}_{fi}.jpg"
+                        cv2.imwrite(str(out_p), annotated)
                         saved += 1
-                        if saved >= 3:
-                            break
+                    if saved >= 3: break
             cap.release()
+
             snap_col, _ = st.columns([1, 1], gap="medium")
             with snap_col:
                 st.markdown('<div class="card">', unsafe_allow_html=True)
                 st.markdown('<p class="st2">Form Snapshots</p>', unsafe_allow_html=True)
                 for issue in issues:
-                    with st.expander(issue["type"].replace("_"," ").title()):
+                    label = issue["type"].replace("_"," ").title()
+                    saved_snaps = sorted(snapshots_dir.glob(f"{issue['type']}_*.jpg"))[:3]
+                    with st.expander(label, expanded=(issue["type"] != "form_sample")):
                         st.caption(issue["description"])
-                        saved_snaps = [
-                            snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")
-                            for fi in issue["frames"][:6]
-                            if (snapshots_dir / (issue["type"] + "_" + str(fi) + ".jpg")).exists()
-                        ][:3]
                         if saved_snaps:
                             ic = st.columns(len(saved_snaps))
                             for i, ip in enumerate(saved_snaps):
-                                ic[i].image(str(ip), use_container_width=True,
-                                            caption="Frame " + ip.stem.split("_")[-1])
+                                ic[i].image(str(ip), width="stretch")
                         else:
-                            st.caption("No snapshot frames available.")
+                            st.caption("No frames captured for this issue.")
                 st.markdown('</div>', unsafe_allow_html=True)
-        except Exception:
-            pass
+        except Exception as _snap_e:
+            import traceback as _tb
+            st.warning(f"Snapshots: {_snap_e}")
+            st.code(_tb.format_exc())
 
     rep_col, _ = st.columns([1, 1], gap="medium")
     with rep_col:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         with st.expander("Per-Rep Breakdown"):
-            st.dataframe(rep_df, use_container_width=True)
+            st.dataframe(rep_df, width="stretch")
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown(
@@ -835,7 +882,7 @@ def run_pipeline(tmp_video, exercise, camera_view):
                 out_root     = str(ROOT / "pipeline" / "bronze"),
                 exercise     = exercise,
                 camera_view  = camera_view,
-                write_overlay= False,
+                write_overlay= True,
             )
             b_sess = ROOT / "pipeline" / "bronze" / session_id
             b_sum  = read_json(b_sess / "summary.json")
@@ -972,7 +1019,7 @@ with tab_upload:
     st.caption("📹 Supported: MP4, MOV, M4V, WebM, MKV, AVI, 3GP, TS, FLV")
     uploaded = st.file_uploader(
         "Choose a video file",
-        type=["mp4","mov","m4v","webm","mkv","avi","3gp","ts","flv","wmv","mpeg","mpg"],
+        type=None,  # Accept ALL file types — validate in pipeline (ffmpeg handles anything)
         key="u_file",
         label_visibility="collapsed"
     )
@@ -1006,7 +1053,7 @@ with tab_upload:
         col_btn, col_clr = st.columns([3, 1])
         with col_btn:
             analyse = st.button("🔬 ANALYSE FORM", type="primary",
-                                use_container_width=True, key="u_analyse")
+                                width="stretch", key="u_analyse")
         with col_clr:
             if st.button("✕ Clear", key="u_clear"):
                 for k in ["u_fid","u_bytes","u_name","u_result"]:
@@ -1015,12 +1062,26 @@ with tab_upload:
 
         if analyse:
             raw_suffix = Path(n).suffix.lower()
-            ext = raw_suffix if raw_suffix in {
-                ".mp4",".mov",".m4v",".webm",".mkv",".avi",
-                ".3gp",".ts",".flv",".wmv",".mpeg",".mpg"
-            } else ".mp4"
+            VIDEO_EXTS = {".mp4",".mov",".m4v",".webm",".mkv",".avi",
+                          ".3gp",".ts",".flv",".wmv",".mpeg",".mpg",".mts",".m2ts"}
+            # Detect ext from content magic bytes if extension missing/unknown
+            if raw_suffix not in VIDEO_EXTS:
+                # Check magic bytes
+                sig = b[:12]
+                if sig[4:8] in (b'ftyp', b'moov', b'mdat'):
+                    ext = ".mp4"
+                elif sig[:4] == b'\x1a\x45\xdf\xa3':
+                    ext = ".webm"
+                elif sig[:3] == b'FLV':
+                    ext = ".flv"
+                elif sig[:4] == b'RIFF':
+                    ext = ".avi"
+                else:
+                    ext = ".mp4"  # let ffmpeg figure it out
+            else:
+                ext = raw_suffix
             tp = Path(tempfile.gettempdir()) / f"formate_up{ext}"
-            st.info(f"▶ Writing {len(b)//1024} KB to `{tp}` then running pipeline…")
+            st.info(f"▶ Writing {len(b)//1024} KB → `{tp}` (detected ext: `{ext}`)")
             try:
                 tp.write_bytes(b)
                 st.info(f"✅ Temp file written: `{tp.stat().st_size//1024}` KB")
@@ -1972,12 +2033,20 @@ function startCountdown(){
       try{
         const vid=document.getElementById("video");
         const rawStream=vid.srcObject;
-        const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-          ?"video/webm;codecs=vp9":"video/webm";
+        // Prefer VP8 — VP9 causes "Not all references available" errors on mobile webm
+        // VP8 produces clean, seekable webm that ffmpeg can process reliably
+        const mimePrefs=[
+          "video/webm;codecs=vp8",
+          "video/webm;codecs=vp8,opus",
+          "video/mp4;codecs=avc1",
+          "video/webm"
+        ];
+        const mimeType=mimePrefs.find(m=>MediaRecorder.isTypeSupported(m))||"video/webm";
+        console.log("[FORMate] Recording codec:", mimeType);
         mediaRecorder=new MediaRecorder(rawStream,
-          {mimeType, videoBitsPerSecond:4000000});
+          {mimeType, videoBitsPerSecond:2500000});
         mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recordedChunks.push(e.data);};
-        mediaRecorder.start(500);
+        mediaRecorder.start(1000); // 1s chunks — larger chunks = more complete frames
         console.log("[FORMate] Recording started (clean video)");
       }catch(err){
         console.warn("[FORMate] MediaRecorder failed:",err);
@@ -2483,7 +2552,7 @@ function saveSession(){
     if not st.session_state.live_results:
         live_upload = st.file_uploader(
             "Session video will appear here automatically after stopping — or upload manually",
-            type=["mp4","mov","m4v","webm","mkv","avi","3gp","ts","flv","wmv"],
+            type=None,  # Accept all — ffmpeg handles conversion
             key="live_video_upload",
             label_visibility="visible"
         )
