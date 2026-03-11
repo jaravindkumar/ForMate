@@ -132,15 +132,15 @@ section[data-testid="stSidebar"]{display:none!important;}
 .sbanner-den{font-size:.58rem;font-weight:600;letter-spacing:.2em;color:rgba(255,255,255,.45);text-transform:uppercase;margin-top:.2rem;}
 .sbanner-stats{display:grid;grid-template-columns:repeat(6,1fr);background:var(--card);}
 .ss{padding:1.1rem .75rem;border-left:1px solid var(--edge);display:flex;flex-direction:column;justify-content:center;gap:.3rem;}
-.ss-v{font-family:'Space Grotesk',sans-serif;font-size:1.7rem;line-height:1;color:var(--txt);font-weight:700;}
+.ss-v{font-family:'Space Grotesk',sans-serif;font-size:1.7rem;line-height:1;color:#fff;font-weight:700;}
 .ss-v.g{color:var(--green);}.ss-v.w{color:var(--red);}
-.ss-k{font-size:.53rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--sub);}
+.ss-k{font-size:.60rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#fff;}
 
 /* SCORE BARS */
 .bw{margin-bottom:.9rem;}
 .brow{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.35rem;}
-.bname{font-size:.78rem;font-weight:500;color:var(--sub);}
-.bval{font-family:'Space Grotesk',sans-serif;font-size:.82rem;font-weight:600;color:var(--txt);}
+.bname{font-size:.82rem;font-weight:600;color:#fff;}
+.bval{font-family:'Space Grotesk',sans-serif;font-size:.88rem;font-weight:700;color:#fff;}
 .btrack{height:4px;background:var(--edge2);border-radius:4px;overflow:hidden;}
 .bfill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--p1),var(--p2));}
 .bfill.mid{background:linear-gradient(90deg,var(--amber),#93C5FD);}
@@ -760,8 +760,10 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
                         if rec.get("pose_detected"):
                             kp_index[rec["frame_idx"]] = {lm["id"]: lm for lm in rec["landmarks"]}
 
-            MP_CONN = [(11,12),(11,13),(13,15),(12,14),(14,16),(11,23),(12,24),(23,24),
+            MP_CONN = [(11,12),(11,13),(13,15),(12,14),(14,16),
+                       (11,23),(12,24),(23,24),
                        (23,25),(25,27),(24,26),(26,28)]
+            BODY_LMS  = list(range(11,17)) + list(range(23,29))
             COL_OK   = (56,189,96);  COL_WARN = (60,165,248);  COL_BAD = (68,68,239)
             COL_BONE = (180,180,180)
 
@@ -817,13 +819,13 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
                     return flags
                 try: flags = _check_form_inline(lms_d, exercise_name, fW, fH)
                 except: flags = {}
-                for i in range(33):
+                for i in BODY_LMS:
                     p = px(i)
                     if not p: continue
                     sev = flags.get(i,"ok")
                     col = COL_OK if sev=="ok" else (COL_WARN if sev=="warn" else COL_BAD)
-                    cv2.circle(frame,p,5,col,-1,cv2.LINE_AA)
-                    cv2.circle(frame,p,6,(0,0,0),1,cv2.LINE_AA)
+                    cv2.circle(frame,p,6,col,-1,cv2.LINE_AA)
+                    cv2.circle(frame,p,7,(0,0,0),1,cv2.LINE_AA)
                 return frame
 
             cap = cv2.VideoCapture(str(vid_for_snap), cv2.CAP_FFMPEG)
@@ -1022,8 +1024,6 @@ tab_upload, tab_live, tab_library = st.tabs(["Upload Video", "Live Trainer", "Wo
 # TAB 1 — UPLOAD VIDEO
 # ════════════════════════════════════════════
 with tab_upload:
-    import base64, io
-    import streamlit.components.v1 as components
 
     st.markdown('<div class="zone">', unsafe_allow_html=True)
     st.markdown(
@@ -1032,60 +1032,44 @@ with tab_upload:
         unsafe_allow_html=True
     )
 
-    # ── Debug: show app environment ──────────────────────────────
-    with st.expander("🔧 Debug Info", expanded=False):
-        st.write(f"ROOT: `{ROOT}`")
-        st.write(f"ROOT exists: `{ROOT.exists()}`")
-        st.write(f"Pipeline scripts: `{[p.name for p in ROOT.glob('pipeline_*.py')]}`")
-        st.write(f"tmpdir: `{tempfile.gettempdir()}`")
-        st.write(f"cwd: `{os.getcwd()}`")
-        try:
-            import mediapipe
-            st.write(f"mediapipe: `{mediapipe.__version__}`")
-        except Exception as e:
-            st.write(f"mediapipe import: ❌ `{e}`")
-        try:
-            import cv2 as _cv2
-            st.write(f"opencv: `{_cv2.__version__}`")
-        except Exception as e:
-            st.write(f"opencv import: ❌ `{e}`")
-        ffmpeg_check = subprocess.run(["ffmpeg","-version"], capture_output=True, timeout=5)
-        st.write(f"ffmpeg: `{'OK' if ffmpeg_check.returncode==0 else 'NOT FOUND'}`")
-
     # ── File uploader ─────────────────────────────────────────────
-    st.caption("📹 Supported: MP4, MOV, M4V, WebM, MKV, AVI, 3GP, TS, FLV")
+    # type=None — mobile browsers send video/quicktime or application/octet-stream
+    # explicit type lists block these silently on iOS/Android
+    st.caption("📹 Tap to upload — MP4, MOV, WebM, MKV, AVI supported")
     uploaded = st.file_uploader(
         "Choose a video file",
-        type=None,  # Accept ALL file types — validate in pipeline (ffmpeg handles anything)
+        type=None,
         key="u_file",
         label_visibility="collapsed"
     )
 
-    # ── Debug: show raw uploader state ───────────────────────────
+    # ── Cache bytes immediately while uploader object is live ─────
     if uploaded is not None:
-        st.info(f"📂 Uploader received: `{uploaded.name}` · `{uploaded.size}` bytes · type=`{uploaded.type}`")
         fid = f"{uploaded.name}_{uploaded.size}"
         if st.session_state.get("u_fid") != fid:
             uploaded.seek(0)
-            data = uploaded.read()
-            st.session_state["u_fid"]    = fid
-            st.session_state["u_bytes"]  = data
-            st.session_state["u_name"]   = uploaded.name
-            st.session_state["u_result"] = None
-            st.info(f"✅ Stored {len(data)//1024} KB in session_state")
-    else:
-        st.caption(f"Uploader state: None  |  session bytes: {len(st.session_state.get('u_bytes') or b'')//1024} KB cached")
+            raw_bytes = uploaded.read()
+            if len(raw_bytes) < 1000:
+                st.error(f"❌ File too small ({len(raw_bytes)} bytes) — try again.")
+            else:
+                st.session_state["u_fid"]    = fid
+                st.session_state["u_bytes"]  = raw_bytes
+                st.session_state["u_name"]   = uploaded.name
+                st.session_state["u_result"] = None
 
-    b = st.session_state.get("u_bytes")
-    n = st.session_state.get("u_name", "video.mp4")
+    # ── Read from session_state (survives reruns) ─────────────────
+    vid_bytes = st.session_state.get("u_bytes")
+    vid_name  = st.session_state.get("u_name", "video.mp4")
 
-    if b:
-        mb = round(len(b)/1024/1024, 1)
-        st.success(f"✓ {n}  ({mb} MB) — ready to analyse")
+    if vid_bytes:
+        mb = round(len(vid_bytes) / 1024 / 1024, 1)
+        st.success(f"✓ {vid_name}  ({mb} MB) — ready to analyse")
+
+        # Preview — use bytes copy so original in session_state stays intact
         try:
-            st.video(b)
-        except Exception as ve:
-            st.warning(f"Preview unavailable: {ve}")
+            st.video(bytes(vid_bytes))
+        except Exception:
+            pass  # preview failure is cosmetic — don't block analysis
 
         col_btn, col_clr = st.columns([3, 1])
         with col_btn:
@@ -1093,45 +1077,65 @@ with tab_upload:
                                 width="stretch", key="u_analyse")
         with col_clr:
             if st.button("✕ Clear", key="u_clear"):
-                for k in ["u_fid","u_bytes","u_name","u_result"]:
+                for k in ["u_fid", "u_bytes", "u_name", "u_result"]:
                     st.session_state.pop(k, None)
                 st.rerun()
 
         if analyse:
-            raw_suffix = Path(n).suffix.lower()
+            # ── Detect extension from magic bytes (most reliable) ─
             VIDEO_EXTS = {".mp4",".mov",".m4v",".webm",".mkv",".avi",
                           ".3gp",".ts",".flv",".wmv",".mpeg",".mpg",".mts",".m2ts"}
-            # Detect ext from content magic bytes if extension missing/unknown
-            if raw_suffix not in VIDEO_EXTS:
-                # Check magic bytes
-                sig = b[:12]
-                if sig[4:8] in (b'ftyp', b'moov', b'mdat'):
-                    ext = ".mp4"
-                elif sig[:4] == b'\x1a\x45\xdf\xa3':
-                    ext = ".webm"
-                elif sig[:3] == b'FLV':
-                    ext = ".flv"
-                elif sig[:4] == b'RIFF':
-                    ext = ".avi"
-                else:
-                    ext = ".mp4"  # let ffmpeg figure it out
-            else:
+            raw_suffix = Path(vid_name).suffix.lower()
+            header = vid_bytes[:16]
+            if header[4:8] in (b"ftyp", b"moov", b"mdat"):
+                ext = ".mp4"
+            elif header[:4] == b"\x1a\x45\xdf\xa3":
+                ext = ".webm"
+            elif header[:3] == b"FLV":
+                ext = ".flv"
+            elif header[:4] == b"RIFF":
+                ext = ".avi"
+            elif raw_suffix in VIDEO_EXTS:
                 ext = raw_suffix
-            tp = Path(tempfile.gettempdir()) / f"formate_up{ext}"
-            st.info(f"▶ Writing {len(b)//1024} KB → `{tp}` (detected ext: `{ext}`)")
+            else:
+                ext = ".mp4"  # ffmpeg handles anything
+
+            # ── Write to unique temp path (avoids concurrent-user collisions) ─
+            uid  = uuid.uuid4().hex[:8]
+            tp   = Path(tempfile.gettempdir()) / f"formate_{uid}{ext}"
             try:
-                tp.write_bytes(b)
-                st.info(f"✅ Temp file written: `{tp.stat().st_size//1024}` KB")
+                tp.write_bytes(vid_bytes)
             except Exception as we:
                 st.error(f"❌ Could not write temp file: {we}")
                 st.stop()
+
+            if tp.stat().st_size < 1000:
+                st.error("❌ Temp file write failed — zero bytes on disk.")
+                st.stop()
+
+            # ── Run pipeline ──────────────────────────────────────
             res = run_pipeline(str(tp), exercise, camera_view)
+
+            # Clean up temp file
+            try: tp.unlink()
+            except Exception: pass
+
             if res:
                 st.session_state["u_result"] = res
                 st.rerun()
             else:
-                st.error("Pipeline returned None — see errors above ↑")
+                st.error("Pipeline returned no result — see errors above ↑")
 
+    elif uploaded is None and not st.session_state.get("u_bytes"):
+        # Nothing uploaded yet — show empty state
+        st.markdown(
+            '<div class="empty-state">'
+            '<div class="empty-logo"><b>🎥</b></div>'
+            '<p style="color:var(--sub);font-size:.85rem;">Upload a video to get started</p>'
+            '</div>', unsafe_allow_html=True
+        )
+
+    # ── Render results (persists across reruns via session_state) ─
     if st.session_state.get("u_result"):
         sid, b_sum, g_sum, rep_df, num_reps, gold_dir = st.session_state["u_result"]
         render_results(sid, gold_dir, b_sum, g_sum, rep_df, num_reps, exercise)
