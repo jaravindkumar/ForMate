@@ -12,10 +12,12 @@ MODEL_NAME = "pose_landmarker_lite.task"
 
 # MediaPipe landmark indices
 MP_CONNECTIONS = [
-    (11,12),(11,13),(13,15),(12,14),(14,16),   # arms
+    (11,12),(11,13),(13,15),(12,14),(14,16),   # arms (shoulder to wrist only)
     (11,23),(12,24),(23,24),                    # torso
     (23,25),(25,27),(24,26),(26,28),            # legs
-    (27,29),(27,31),(28,30),(28,32),            # feet
+    # feet omitted — noisy at distance
+    # face landmarks (0-10) omitted
+    # finger joints (17-22) omitted
 ]
 
 # Colour palette
@@ -165,13 +167,15 @@ def _draw_skeleton(frame, lms, flags, W, H):
             cv2.line(frame, pa, pb, COL_BONE, 2, cv2.LINE_AA)
 
     # Draw joints coloured by flag severity
-    for idx in range(33):
+    # Skip face (0-10) and finger/palm (17-22, 29-32) landmarks
+    BODY_LANDMARKS = list(range(11, 17)) + list(range(23, 29))
+    for idx in BODY_LANDMARKS:
         p = px(idx)
         if p is None: continue
         sev = flags.get(idx, "ok")
         col = COL_OK if sev == "ok" else (COL_WARN if sev == "warn" else COL_BAD)
-        cv2.circle(frame, p, 5, col, -1, cv2.LINE_AA)
-        cv2.circle(frame, p, 6, (0,0,0), 1, cv2.LINE_AA)
+        cv2.circle(frame, p, 6, col, -1, cv2.LINE_AA)
+        cv2.circle(frame, p, 7, (0,0,0), 1, cv2.LINE_AA)
 
     return frame
 

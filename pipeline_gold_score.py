@@ -174,7 +174,7 @@ def run_gold(session_id: str, exercise: str = "deadlift", root: str = None) -> d
         setup_x_std = float(np.nanstd((setup["l_ankle_x_n"] + setup["r_ankle_x_n"]) / 2.0))
 
     # Scores (simple, explainable)
-    setup_consistency = score_from_std(setup_x_std, good=0.01, bad=0.08)
+    setup_consistency = score_from_std(setup_x_std, good=0.02, bad=0.12)
 
     # hinge score from hinge ratio: > 1 is hip dominant, < 1 is knee dominant
     if not np.isfinite(hinge_ratio_med):
@@ -185,10 +185,10 @@ def run_gold(session_id: str, exercise: str = "deadlift", root: str = None) -> d
 
     # symmetry score: smaller diffs better
     sym_raw = 0.5 * shoulder_sym_med + 0.5 * knee_sym_med
-    symmetry = score_from_std(sym_raw, good=0.01, bad=0.08)
+    symmetry = score_from_std(sym_raw, good=0.03, bad=0.20)
 
     # trunk control score: smaller angle means more stable
-    trunk_control = score_from_std(trunk_p95, good=10.0, bad=35.0) if np.isfinite(trunk_p95) else 50.0
+    trunk_control = score_from_std(trunk_p95, good=20.0, bad=60.0) if np.isfinite(trunk_p95) else 50.0
 
     # tempo score: lower CV is better
     tempo_consistency = float(100.0 * clamp01((0.30 - tempo_pull_cv) / 0.30))
