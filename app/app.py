@@ -137,14 +137,16 @@ section[data-testid="stSidebar"]{display:none!important;}
 .ss-k{font-size:.60rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#fff;}
 
 /* SCORE BARS */
-.bw{margin-bottom:.9rem;}
-.brow{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.35rem;}
-.bname{font-size:.82rem;font-weight:600;color:#fff;}
-.bval{font-family:'Space Grotesk',sans-serif;font-size:.88rem;font-weight:700;color:#fff;}
-.btrack{height:4px;background:var(--edge2);border-radius:4px;overflow:hidden;}
-.bfill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--p1),var(--p2));}
-.bfill.mid{background:linear-gradient(90deg,var(--amber),#93C5FD);}
-.bfill.low{background:linear-gradient(90deg,var(--red),#F87171);}
+.bw{margin-bottom:0;}
+.brow-wrap{display:grid;grid-template-columns:180px 1fr 52px;align-items:center;gap:1rem;padding:.85rem 1.2rem;border-bottom:1px solid var(--edge2);}
+.brow-wrap:last-child{border-bottom:none;}
+.bname{font-size:.95rem;font-weight:500;color:#fff;white-space:nowrap;}
+.btrack{height:6px;background:var(--edge2);border-radius:6px;overflow:hidden;}
+.bfill{height:100%;border-radius:6px;background:linear-gradient(90deg,#1D4ED8,#3B82F6);}
+.bfill.mid{background:linear-gradient(90deg,#D97706,#F59E0B);}
+.bfill.low{background:linear-gradient(90deg,#DC2626,#EF4444);}
+.bval{font-family:'Space Grotesk',sans-serif;font-size:1.05rem;font-weight:700;color:#fff;text-align:right;}
+.bval.g{color:#22C55E;}.bval.m{color:#F59E0B;}.bval.r{color:#EF4444;}
 
 /* COACH FEEDBACK */
 .ci{display:flex;align-items:flex-start;gap:.75rem;padding:.8rem 1rem;border-radius:10px;margin-bottom:.4rem;font-size:.84rem;line-height:1.6;}
@@ -673,27 +675,34 @@ def render_results(session_id, gold_dir, b_sum, g_sum, rep_df, num_reps, exercis
         st.markdown('</div>', unsafe_allow_html=True)
 
     with row1_r:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<p class="st2">Score Breakdown</p>', unsafe_allow_html=True)
-        for label, key in [("Hinge Quality","hinge_quality"),("Trunk Control","trunk_control"),
-                            ("Symmetry","symmetry"),("Tempo Consistency","tempo_consistency"),
-                            ("Setup Consistency","setup_consistency")]:
-            v  = safe(scores.get(key, 0))
-            vi = int(v)
-            bc = bcls(v)
-            st.markdown(
-                '<div class="bw"><div class="brow"><span class="bname">' + label + '</span>'
-                '<span class="bval">' + str(vi) + '</span></div>'
-                '<div class="btrack"><div class="bfill ' + bc + '" style="width:' + str(vi) + '%"></div></div></div>',
-                unsafe_allow_html=True
-            )
-        flags = g_sum.get("flags", [])
-        if flags:
-            st.markdown('<hr class="div"/>', unsafe_allow_html=True)
-            st.markdown('<p class="st2">Flags</p>', unsafe_allow_html=True)
-            for f in flags:
-                st.markdown('<div class="flag"><div class="fdot"></div>' + f.get("message","") + '</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.empty()  # keep column layout balanced
+
+    # ── Score Breakdown full-width ────────────────────────────
+    st.markdown('<div class="card" style="padding:0;overflow:hidden;">', unsafe_allow_html=True)
+    st.markdown('<p class="st2" style="padding:1rem 1.2rem .5rem;">Score Breakdown</p>', unsafe_allow_html=True)
+    for label, key in [("Hinge Quality","hinge_quality"),("Trunk Control","trunk_control"),
+                        ("Symmetry","symmetry"),("Tempo Consistency","tempo_consistency"),
+                        ("Setup Consistency","setup_consistency")]:
+        v  = safe(scores.get(key, 0))
+        vi = int(v)
+        bc = bcls(v)
+        vc = "g" if v >= 75 else ("m" if v >= 50 else "r")
+        st.markdown(
+            '<div class="brow-wrap">'
+            '<span class="bname">' + label + '</span>'
+            '<div class="btrack"><div class="bfill ' + bc + '" style="width:' + str(vi) + '%;height:100%;"></div></div>'
+            '<span class="bval ' + vc + '">' + str(vi) + '</span>'
+            '</div>',
+            unsafe_allow_html=True
+        )
+    flags = g_sum.get("flags", [])
+    if flags:
+        st.markdown('<div style="padding:.75rem 1.2rem 0;"><p class="st2">Flags</p></div>', unsafe_allow_html=True)
+        for f in flags:
+            sev = f.get("severity","warn")
+            cls = "bad" if sev=="bad" else ("ok" if sev=="ok" else "warn")
+            st.markdown('<div style="padding:0 1.2rem .5rem;"><div class="flag ' + cls + '"><div class="fdot"></div>' + f.get("message","") + '</div></div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     row2_l, row2_r = st.columns([1, 1], gap="medium")
 
@@ -1017,7 +1026,7 @@ with ctrl_r:
     camera_view = st.selectbox("Camera", ["front_oblique", "side"], key="sel_camera")
 
 # ─── TABS ─────────────────────────────────────────────────────────
-tab_upload, tab_live, tab_library = st.tabs(["Upload Video", "Live Trainer", "Workout Library"])
+tab_upload, tab_live, tab_body, tab_library = st.tabs(["Upload Video", "Live Trainer", "Body Assessment", "Workout Library"])
 
 
 # ════════════════════════════════════════════
@@ -2651,7 +2660,689 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ════════════════════════════════════════════
-# TAB 3 — WORKOUT LIBRARY
+# ════════════════════════════════════════════
+# TAB 3 — BODY ASSESSMENT
+# ════════════════════════════════════════════
+with tab_body:
+
+    # ── CSS for this tab ─────────────────────────────────────────
+    st.markdown("""<style>
+.ba-zone{background:var(--card);border:1px solid var(--edge);border-radius:20px;padding:2rem 2.25rem;margin-bottom:1.5rem;}
+.ba-headline{font-family:'Space Grotesk',sans-serif;font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:700;letter-spacing:-.03em;line-height:1.15;margin-bottom:.4rem;}
+.ba-headline span{background:linear-gradient(135deg,var(--p2),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.ba-desc{color:var(--sub);font-size:.88rem;line-height:1.7;margin-bottom:1.5rem;}
+.ba-section{font-family:'Space Grotesk',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);margin:1.5rem 0 .75rem;}
+.ba-metric-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.75rem;margin-bottom:1.25rem;}
+.ba-metric{background:var(--card2);border:1px solid var(--edge);border-radius:14px;padding:1rem 1.1rem;}
+.ba-metric-label{font-size:.65rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--sub);margin-bottom:.3rem;}
+.ba-metric-value{font-family:'Space Grotesk',sans-serif;font-size:1.7rem;font-weight:700;line-height:1;color:var(--txt);}
+.ba-metric-unit{font-size:.72rem;color:var(--sub);margin-top:.2rem;}
+.ba-metric-sub{font-size:.68rem;color:var(--sub2);margin-top:.15rem;}
+.ba-metric.good .ba-metric-value{color:#34D399;}
+.ba-metric.warn .ba-metric-value{color:#FBBF24;}
+.ba-metric.bad  .ba-metric-value{color:var(--red);}
+.ba-metric.blue .ba-metric-value{color:var(--p2);}
+.ba-bar-row{display:flex;align-items:center;gap:.75rem;margin-bottom:.6rem;}
+.ba-bar-label{font-size:.75rem;color:var(--sub);width:130px;flex-shrink:0;}
+.ba-bar-track{flex:1;background:var(--edge);border-radius:4px;height:7px;overflow:hidden;}
+.ba-bar-fill{height:100%;border-radius:4px;transition:width .6s ease;}
+.ba-bar-val{font-size:.75rem;font-weight:600;color:var(--txt);width:38px;text-align:right;flex-shrink:0;}
+.ba-flag{display:flex;align-items:flex-start;gap:.75rem;background:var(--card2);border:1px solid var(--edge);border-radius:12px;padding:.85rem 1rem;margin-bottom:.6rem;}
+.ba-flag-icon{font-size:1.1rem;flex-shrink:0;margin-top:.05rem;}
+.ba-flag-title{font-size:.8rem;font-weight:600;color:var(--txt);margin-bottom:.15rem;}
+.ba-flag-body{font-size:.73rem;color:var(--sub);line-height:1.55;}
+.ba-flag.ok{border-color:rgba(52,211,153,.2);}
+.ba-flag.ok .ba-flag-title{color:#34D399;}
+.ba-flag.warn{border-color:rgba(251,191,36,.2);}
+.ba-flag.warn .ba-flag-title{color:#FBBF24;}
+.ba-flag.bad{border-color:rgba(239,68,68,.2);}
+.ba-flag.bad .ba-flag-title{color:var(--red);}
+.ba-report-card{background:linear-gradient(135deg,var(--card2),var(--card));border:1px solid var(--edge2);border-radius:16px;padding:1.5rem;margin-top:1rem;}
+.ba-report-title{font-family:'Space Grotesk',sans-serif;font-size:.95rem;font-weight:700;color:var(--p2);margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem;}
+.ba-report-body{font-size:.82rem;color:var(--sub);line-height:1.75;white-space:pre-wrap;}
+.ba-upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem;}
+.ba-photo-label{font-size:.75rem;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem;}
+.ba-disclaimer{font-size:.67rem;color:var(--sub2);background:var(--card2);border:1px solid var(--edge);border-radius:10px;padding:.6rem .8rem;line-height:1.6;margin-top:1rem;}
+.ba-somatotype{display:inline-block;background:linear-gradient(135deg,var(--p1),var(--p2));color:white;font-family:'Space Grotesk',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:.06em;padding:.3rem .75rem;border-radius:20px;margin-top:.3rem;}
+@media(max-width:600px){.ba-upload-grid{grid-template-columns:1fr;}.ba-metric-grid{grid-template-columns:repeat(2,1fr);}}
+</style>""", unsafe_allow_html=True)
+
+    # ── Imports needed ────────────────────────────────────────────
+    import io
+    from PIL import Image as PILImage
+
+    # ── Body Assessment helper functions ─────────────────────────
+
+    def ba_get_landmarks(img_array):
+        """Run MediaPipe Pose on a single image, return normalised landmarks or None."""
+        try:
+            import mediapipe as mp
+            mp_pose = mp.solutions.pose
+            with mp_pose.Pose(
+                static_image_mode=True,
+                model_complexity=2,
+                enable_segmentation=False,
+                min_detection_confidence=0.4
+            ) as pose:
+                rgb = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+                results = pose.process(rgb)
+                if results.pose_landmarks:
+                    lms = results.pose_landmarks.landmark
+                    return {i: {"x": lm.x, "y": lm.y, "z": lm.z, "v": lm.visibility}
+                            for i, lm in enumerate(lms)}
+        except Exception as e:
+            st.warning(f"Landmark detection issue: {e}")
+        return None
+
+    def ba_pixel_to_cm(img_h_px, height_cm):
+        """Return cm-per-pixel scale factor using known height."""
+        # Assume person occupies ~85% of image height
+        body_px = img_h_px * 0.85
+        return height_cm / body_px
+
+    def ba_angle_3pts(a, b, c):
+        """Angle at point b formed by a-b-c (degrees)."""
+        v1 = np.array([a[0]-b[0], a[1]-b[1]])
+        v2 = np.array([c[0]-b[0], c[1]-b[1]])
+        n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+        if n1 < 1e-6 or n2 < 1e-6: return 0.0
+        cos = np.clip(np.dot(v1, v2) / (n1 * n2), -1, 1)
+        return float(np.degrees(np.arccos(cos)))
+
+    def ba_landmark_px(lms, idx, W, H):
+        """Convert normalised landmark to pixel coords."""
+        if idx not in lms: return None
+        lm = lms[idx]
+        if lm["v"] < 0.3: return None
+        return (lm["x"] * W, lm["y"] * H)
+
+    def ba_compute_body_fat(waist_cm, neck_cm, height_cm, sex, hip_cm=None):
+        """U.S. Navy body fat formula."""
+        try:
+            if sex == "Male":
+                bf = 495 / (1.0324 - 0.19077 * math.log10(waist_cm - neck_cm) + 0.15456 * math.log10(height_cm)) - 450
+            else:
+                if hip_cm is None: hip_cm = waist_cm * 1.05
+                bf = 495 / (1.29579 - 0.35004 * math.log10(waist_cm + hip_cm - neck_cm) + 0.22100 * math.log10(height_cm)) - 450
+            return max(3.0, min(50.0, round(bf, 1)))
+        except:
+            return None
+
+    def ba_compute_ffmi(lean_kg, height_m):
+        """Fat-Free Mass Index."""
+        return round(lean_kg / (height_m ** 2), 1)
+
+    def ba_segment_lengths(lms, W, H, scale_cm_px):
+        """Estimate key segment lengths in cm."""
+        def dist(a, b):
+            if a is None or b is None: return None
+            return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2) * scale_cm_px
+
+        # Landmark indices (MediaPipe)
+        # 0=nose,11=l_shoulder,12=r_shoulder,13=l_elbow,14=r_elbow
+        # 15=l_wrist,16=r_wrist,23=l_hip,24=r_hip
+        # 25=l_knee,26=r_knee,27=l_ankle,28=r_ankle
+
+        lm = lambda i: ba_landmark_px(lms, i, W, H)
+
+        torso    = dist(lm(11) and lm(12) and ((lm(11)[0]+lm(12)[0])/2, (lm(11)[1]+lm(12)[1])/2),
+                        lm(23) and lm(24) and ((lm(23)[0]+lm(24)[0])/2, (lm(23)[1]+lm(24)[1])/2))
+        l_femur  = dist(lm(23), lm(25))
+        r_femur  = dist(lm(24), lm(26))
+        l_tibia  = dist(lm(25), lm(27))
+        r_tibia  = dist(lm(26), lm(28))
+        l_arm    = dist(lm(11), lm(13))
+        r_arm    = dist(lm(12), lm(14))
+        l_fore   = dist(lm(13), lm(15))
+        r_fore   = dist(lm(14), lm(16))
+        sh_width = dist(lm(11), lm(12))
+        hip_width= dist(lm(23), lm(24))
+
+        femur  = (l_femur or 0 + r_femur or 0) / 2 if (l_femur and r_femur) else (l_femur or r_femur)
+        tibia  = (l_tibia or 0 + r_tibia or 0) / 2 if (l_tibia and r_tibia) else (l_tibia or r_tibia)
+        arm    = (l_arm or 0 + r_arm or 0) / 2 if (l_arm and r_arm) else (l_arm or r_arm)
+        fore   = (l_fore or 0 + r_fore or 0) / 2 if (l_fore and r_fore) else (l_fore or r_fore)
+
+        return {
+            "torso_cm": round(torso, 1) if torso else None,
+            "femur_cm": round(femur, 1) if femur else None,
+            "tibia_cm": round(tibia, 1) if tibia else None,
+            "upper_arm_cm": round(arm, 1) if arm else None,
+            "forearm_cm": round(fore, 1) if fore else None,
+            "shoulder_width_cm": round(sh_width, 1) if sh_width else None,
+            "hip_width_cm": round(hip_width, 1) if hip_width else None,
+        }
+
+    def ba_postural_analysis(lms_front, lms_side, W_f, H_f, W_s, H_s):
+        """Compute postural deviations. Returns dict of findings."""
+        findings = {}
+
+        # ── From FRONT photo ──────────────────────────────────────
+        if lms_front:
+            lm = lambda i: ba_landmark_px(lms_front, i, W_f, H_f)
+
+            # Shoulder level (y coords — lower y = higher on screen)
+            ls, rs = lm(11), lm(12)
+            if ls and rs:
+                diff_px = abs(ls[1] - rs[1])
+                diff_cm = diff_px / (H_f * 0.85) * 170  # approx
+                findings["shoulder_imbalance_cm"] = round(diff_cm, 1)
+                findings["shoulder_high_side"] = "Left" if ls[1] < rs[1] else "Right"
+
+            # Hip level
+            lh, rh = lm(23), lm(24)
+            if lh and rh:
+                diff_px = abs(lh[1] - rh[1])
+                diff_cm = diff_px / (H_f * 0.85) * 170
+                findings["hip_imbalance_cm"] = round(diff_cm, 1)
+                findings["hip_high_side"] = "Left" if lh[1] < rh[1] else "Right"
+
+            # Knee valgus proxy — knee x vs ankle x spread
+            lk, la = lm(25), lm(27)
+            rk, ra = lm(26), lm(28)
+            if lk and la and rk and ra:
+                # In neutral: knees should be above ankles
+                l_valgus = (lk[0] - la[0]) / W_f  # +ve = knee inside ankle
+                r_valgus = (ra[0] - rk[0]) / W_f
+                findings["knee_valgus_l"] = round(l_valgus * 100, 1)
+                findings["knee_valgus_r"] = round(r_valgus * 100, 1)
+
+            # Lateral trunk lean
+            nose = lm(0)
+            if nose and lh and rh:
+                mid_hip_x = (lh[0] + rh[0]) / 2
+                lean_px = nose[0] - mid_hip_x
+                findings["lateral_lean_pct"] = round(lean_px / W_f * 100, 1)
+
+        # ── From SIDE photo ───────────────────────────────────────
+        if lms_side:
+            lm = lambda i: ba_landmark_px(lms_side, i, W_s, H_s)
+
+            # Forward head posture — ear (0/nose proxy) vs shoulder
+            nose, shoulder = lm(0), lm(11) or lm(12)
+            if nose and shoulder:
+                fhp_px = nose[0] - shoulder[0]  # +ve = head forward
+                findings["forward_head_cm"] = round(abs(fhp_px) / (H_s * 0.85) * 170 * 0.15, 1)
+                findings["forward_head_dir"] = "forward" if fhp_px > 0 else "back"
+
+            # Anterior pelvic tilt — angle at hip
+            hip = lm(23) or lm(24)
+            knee = lm(25) or lm(26)
+            shoulder2 = lm(11) or lm(12)
+            if hip and knee and shoulder2:
+                # Trunk angle from vertical
+                trunk_angle = math.degrees(math.atan2(
+                    abs(shoulder2[0] - hip[0]),
+                    abs(shoulder2[1] - hip[1])
+                ))
+                findings["trunk_forward_lean_deg"] = round(trunk_angle, 1)
+
+            # Knee hyperextension
+            hip2, knee2, ankle = lm(23) or lm(24), lm(25) or lm(26), lm(27) or lm(28)
+            if hip2 and knee2 and ankle:
+                knee_angle = ba_angle_3pts(hip2, knee2, ankle)
+                findings["knee_angle_standing"] = round(knee_angle, 1)
+                findings["knee_hyperextension"] = knee_angle > 185
+
+        return findings
+
+    def ba_estimate_circumferences(lms_front, W, H, scale):
+        """Estimate waist/hip/neck width from front photo as proxy for circumference."""
+        if not lms_front: return {}
+        lm = lambda i: ba_landmark_px(lms_front, i, W, H)
+
+        # Shoulder width → neck proxy
+        ls, rs = lm(11), lm(12)
+        sh_w = math.sqrt((ls[0]-rs[0])**2 + (ls[1]-rs[1])**2) * scale if ls and rs else None
+
+        # Hip width from landmarks 23,24
+        lh, rh = lm(23), lm(24)
+        hip_w = math.sqrt((lh[0]-rh[0])**2 + (lh[1]-rh[1])**2) * scale if lh and rh else None
+
+        # Waist: midpoint between shoulder and hip
+        waist_w = None
+        if ls and rs and lh and rh:
+            # Estimate waist as 75% of hip width (approximation)
+            waist_w = hip_w * 0.75 if hip_w else None
+
+        # Convert widths → circumferences (approximate: circ ≈ width × π × 0.75)
+        # This is a rough anthropometric approximation
+        circ = lambda w: round(w * math.pi * 0.75, 1) if w else None
+
+        neck_circ  = round(sh_w * 0.28, 1) if sh_w else None  # neck ~ 28% of shoulder width
+        waist_circ = circ(waist_w)
+        hip_circ   = circ(hip_w * 1.1) if hip_w else None
+
+        return {
+            "neck_cm_est": neck_circ,
+            "waist_cm_est": waist_circ,
+            "hip_cm_est": hip_circ,
+        }
+
+    def ba_somatotype(sh_w, hip_w, waist_w):
+        """Simple somatotype classification from proportions."""
+        if not all([sh_w, hip_w, waist_w]):
+            return "Unknown", "Insufficient landmark data for classification."
+        ratio_sh_hip = sh_w / hip_w
+        if ratio_sh_hip > 1.25:
+            return "Mesomorph", "Broad shoulders, narrow hips — naturally muscular build. Responds well to strength training."
+        elif ratio_sh_hip < 0.90:
+            return "Endomorph", "Wider hips relative to shoulders — tends to store fat more easily. Responds well to metabolic conditioning."
+        else:
+            return "Ectomorph / Balanced", "Balanced shoulder-to-hip ratio — lean frame. Responds well to volume-based hypertrophy training."
+
+    def ba_bmi_category(bmi):
+        if bmi < 18.5: return "Underweight", "bad"
+        elif bmi < 25: return "Healthy", "good"
+        elif bmi < 30: return "Overweight", "warn"
+        else: return "Obese", "bad"
+
+    def ba_bf_category(bf, sex):
+        if sex == "Male":
+            if bf < 6: return "Essential fat", "warn"
+            elif bf < 14: return "Athletic", "good"
+            elif bf < 18: return "Fitness", "good"
+            elif bf < 25: return "Average", "warn"
+            else: return "Above average", "bad"
+        else:
+            if bf < 14: return "Essential fat", "warn"
+            elif bf < 21: return "Athletic", "good"
+            elif bf < 25: return "Fitness", "good"
+            elif bf < 32: return "Average", "warn"
+            else: return "Above average", "bad"
+
+    def ba_call_llm(data: dict) -> str:
+        """Generate personalised coaching report via LLM."""
+        prompt = f"""You are a sports scientist and personal trainer writing a personalised body assessment report.
+
+ASSESSMENT DATA:
+- Sex: {data.get('sex')}
+- Age: {data.get('age')} years
+- Height: {data.get('height_cm')} cm
+- Weight: {data.get('weight_kg')} kg
+- BMI: {data.get('bmi')} ({data.get('bmi_cat')})
+- Est. Body Fat: {data.get('bf_pct')}%  ({data.get('bf_cat')})
+- Lean Mass: {data.get('lean_kg')} kg
+- Fat Mass: {data.get('fat_kg')} kg
+- FFMI: {data.get('ffmi')}
+- Shoulder width: {data.get('shoulder_width_cm')} cm
+- Hip width: {data.get('hip_width_cm')} cm
+- Femur length: {data.get('femur_cm')} cm
+- Torso length: {data.get('torso_cm')} cm
+- Somatotype: {data.get('somatotype')}
+
+POSTURAL FINDINGS:
+- Forward head posture: {data.get('forward_head_cm')} cm forward
+- Trunk forward lean: {data.get('trunk_lean')} degrees
+- Shoulder imbalance: {data.get('shoulder_imbal')} cm ({data.get('shoulder_high')} higher)
+- Hip imbalance: {data.get('hip_imbal')} cm ({data.get('hip_high')} higher)
+- Standing knee angle: {data.get('knee_angle')} degrees
+
+Write a concise, plain-English assessment (250-300 words) covering:
+1. What their body composition means for them RIGHT NOW (honest, not alarming)
+2. What their proportions mean for their training (e.g. long femurs, torso:leg ratio)
+3. Their 2-3 most important postural findings and what causes them in everyday life
+4. 3 specific, actionable recommendations tailored to their exact numbers
+
+Be direct, warm, and specific. Avoid generic advice. Reference their actual numbers.
+No bullet points — write in flowing paragraphs. Keep it under 300 words."""
+
+        try:
+            # Increase token limit for body assessment
+            gk = get_secret("GROQ_API_KEY")
+            if gk:
+                r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": "Bearer " + gk, "Content-Type": "application/json"},
+                    json={"model": "llama-3.3-70b-versatile",
+                          "messages": [{"role": "user", "content": prompt}],
+                          "max_tokens": 900},
+                    timeout=40)
+                if r.status_code == 200:
+                    return r.json()["choices"][0]["message"]["content"]
+            return call_llm(prompt)
+        except Exception as e:
+            return f"AI report unavailable: {e}"
+
+    # ── UI ────────────────────────────────────────────────────────
+    st.markdown('<div class="main">', unsafe_allow_html=True)
+    st.markdown('<div class="ba-zone">', unsafe_allow_html=True)
+    st.markdown(
+        '<h2 class="ba-headline">Know Your <span>Body.</span></h2>'
+        '<p class="ba-desc">Upload a front and side photo. Add your height and weight. '
+        'FORMate maps your posture, estimates body composition, and gives you a personalised training blueprint — '
+        'in 60 seconds, from your phone camera.</p>',
+        unsafe_allow_html=True)
+
+    # ── Step 1: Inputs ────────────────────────────────────────────
+    st.markdown('<p class="ba-section">Step 1 — Your Details</p>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        ba_sex = st.selectbox("Sex", ["Male", "Female"], key="ba_sex",
+                              label_visibility="visible")
+    with c2:
+        ba_age = st.number_input("Age", min_value=16, max_value=80, value=28, key="ba_age",
+                                 label_visibility="visible")
+    with c3:
+        ba_height = st.number_input("Height (cm)", min_value=140, max_value=220, value=175,
+                                    key="ba_height", label_visibility="visible")
+    with c4:
+        ba_weight = st.number_input("Weight (kg)", min_value=40.0, max_value=200.0, value=75.0,
+                                    step=0.5, key="ba_weight", label_visibility="visible")
+
+    # ── Step 2: Photos ────────────────────────────────────────────
+    st.markdown('<p class="ba-section">Step 2 — Upload Photos</p>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="font-size:.75rem;color:var(--sub);background:var(--card2);border:1px solid var(--edge);
+    border-radius:10px;padding:.65rem .85rem;margin-bottom:1rem;line-height:1.65;">
+    📸 <strong>Tips for best results:</strong>
+    Stand 2–3m from camera &nbsp;·&nbsp; Full body visible head to toe &nbsp;·&nbsp;
+    Wear fitted clothing &nbsp;·&nbsp; Stand on a flat surface &nbsp;·&nbsp;
+    Arms slightly away from body
+    </div>""", unsafe_allow_html=True)
+
+    col_f, col_s = st.columns(2)
+    with col_f:
+        st.markdown('<p class="ba-photo-label">📷 Front View</p>', unsafe_allow_html=True)
+        ba_front = st.file_uploader("Front photo", type=["jpg","jpeg","png","webp"],
+                                    key="ba_front", label_visibility="collapsed")
+        if ba_front:
+            st.image(ba_front, use_column_width=True)
+    with col_s:
+        st.markdown('<p class="ba-photo-label">📷 Side View (optional but recommended)</p>',
+                    unsafe_allow_html=True)
+        ba_side = st.file_uploader("Side photo", type=["jpg","jpeg","png","webp"],
+                                   key="ba_side", label_visibility="collapsed")
+        if ba_side:
+            st.image(ba_side, use_column_width=True)
+
+    st.markdown('<div class="ba-disclaimer">⚠️ <strong>Estimates only.</strong> '
+                'Body fat and muscle mass are calculated from anthropometric formulas — not medical-grade measurements. '
+                'Accuracy is typically ±4–6%. For clinical accuracy use DEXA or InBody scanning. '
+                'This tool is for fitness guidance only, not medical advice.</div>',
+                unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)  # close ba-zone
+
+    # ── Analyse button ────────────────────────────────────────────
+    if ba_front is not None:
+        if st.button("🔬 Analyse My Body", type="primary", key="ba_run",
+                     use_container_width=True):
+
+            with st.spinner("Detecting landmarks and computing metrics…"):
+
+                # Load images
+                def load_img(uploaded):
+                    arr = np.frombuffer(uploaded.read(), np.uint8)
+                    uploaded.seek(0)
+                    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    return img
+
+                img_front = load_img(ba_front)
+                img_side  = load_img(ba_side) if ba_side else None
+
+                H_f, W_f = img_front.shape[:2]
+                H_s, W_s = (img_side.shape[:2] if img_side is not None else (0, 0))
+
+                # Get landmarks
+                lms_front = ba_get_landmarks(img_front)
+                lms_side  = ba_get_landmarks(img_side) if img_side is not None else None
+
+                # Scale factor
+                scale = ba_pixel_to_cm(H_f, ba_height)
+
+                # Segment lengths
+                segs = ba_segment_lengths(lms_front, W_f, H_f, scale) if lms_front else {}
+
+                # Circumference estimates
+                circs = ba_estimate_circumferences(lms_front, W_f, H_f, scale) if lms_front else {}
+
+                # Body composition
+                bmi   = round(ba_weight / ((ba_height / 100) ** 2), 1)
+                bmi_cat, bmi_cls = ba_bmi_category(bmi)
+
+                # Body fat
+                neck_c  = circs.get("neck_cm_est") or (ba_height * 0.21)
+                waist_c = circs.get("waist_cm_est") or (ba_height * 0.47 if ba_sex == "Male" else ba_height * 0.44)
+                hip_c   = circs.get("hip_cm_est")
+
+                bf_pct = ba_compute_body_fat(waist_c, neck_c, ba_height, ba_sex, hip_c)
+                if bf_pct is None:
+                    bf_pct = 22.0 if ba_sex == "Male" else 28.0  # fallback average
+                bf_cat, bf_cls = ba_bf_category(bf_pct, ba_sex)
+
+                lean_kg  = round(ba_weight * (1 - bf_pct / 100), 1)
+                fat_kg   = round(ba_weight - lean_kg, 1)
+                ffmi     = ba_compute_ffmi(lean_kg, ba_height / 100)
+
+                # Waist:height ratio
+                whr = round(waist_c / ba_height, 3) if waist_c else None
+
+                # Somatotype
+                sh_w  = segs.get("shoulder_width_cm")
+                hip_w = segs.get("hip_width_cm")
+                soma_type, soma_desc = ba_somatotype(sh_w, hip_w, waist_c)
+
+                # Postural analysis
+                posture = ba_postural_analysis(
+                    lms_front, lms_side,
+                    W_f, H_f, W_s, H_s
+                )
+
+                # Femur:torso ratio
+                femur_cm = segs.get("femur_cm")
+                torso_cm = segs.get("torso_cm")
+                ft_ratio = round(femur_cm / torso_cm, 2) if femur_cm and torso_cm else None
+
+            # ── RESULTS ──────────────────────────────────────────
+            st.markdown('<div class="ba-zone">', unsafe_allow_html=True)
+            st.markdown('<p class="ba-section">Body Composition</p>', unsafe_allow_html=True)
+
+            # Metric grid
+            def metric_card(label, value, unit="", sub="", cls=""):
+                return f"""<div class="ba-metric {cls}">
+                <div class="ba-metric-label">{label}</div>
+                <div class="ba-metric-value">{value}</div>
+                <div class="ba-metric-unit">{unit}</div>
+                {'<div class="ba-metric-sub">'+sub+'</div>' if sub else ''}
+                </div>"""
+
+            cards_html = ""
+            cards_html += metric_card("BMI", bmi, "kg/m²", bmi_cat, bmi_cls)
+            cards_html += metric_card("Body Fat", f"{bf_pct}%", "estimated", bf_cat, bf_cls)
+            cards_html += metric_card("Lean Mass", f"{lean_kg}", "kg", "muscle + bone + organ", "blue")
+            cards_html += metric_card("Fat Mass", f"{fat_kg}", "kg", "", "")
+            cards_html += metric_card("FFMI", ffmi, "", "Fat-free mass index", "blue" if ffmi >= 18 else "")
+            if whr:
+                whr_cls = "good" if whr < 0.5 else "warn" if whr < 0.6 else "bad"
+                cards_html += metric_card("Waist:Height", whr, "ratio", "< 0.5 is optimal", whr_cls)
+
+            st.markdown(f'<div class="ba-metric-grid">{cards_html}</div>', unsafe_allow_html=True)
+
+            # ── Body proportions ─────────────────────────────────
+            st.markdown('<p class="ba-section">Body Proportions</p>', unsafe_allow_html=True)
+            prop_cards = ""
+            if sh_w:  prop_cards += metric_card("Shoulder Width", f"{sh_w}", "cm", "", "blue")
+            if hip_w: prop_cards += metric_card("Hip Width", f"{hip_w}", "cm", "", "")
+            if sh_w and hip_w:
+                shr = round(sh_w / hip_w, 2)
+                shr_cls = "good" if shr > 1.15 else ""
+                prop_cards += metric_card("Shoulder:Hip", shr, "ratio", "V-taper indicator", shr_cls)
+            if femur_cm: prop_cards += metric_card("Femur Length", f"{femur_cm}", "cm", "affects squat stance", "")
+            if torso_cm: prop_cards += metric_card("Torso Length", f"{torso_cm}", "cm", "", "")
+            if ft_ratio:
+                ft_cls = "warn" if ft_ratio > 1.1 else ""
+                ft_sub = "Long femurs — widen squat stance" if ft_ratio > 1.0 else "Balanced proportions"
+                prop_cards += metric_card("Femur:Torso", ft_ratio, "ratio", ft_sub, ft_cls)
+            if segs.get("upper_arm_cm"):
+                prop_cards += metric_card("Upper Arm", f"{segs['upper_arm_cm']}", "cm", "", "")
+
+            if prop_cards:
+                st.markdown(f'<div class="ba-metric-grid">{prop_cards}</div>', unsafe_allow_html=True)
+
+            # Somatotype badge
+            st.markdown(
+                f'<div style="margin-bottom:.5rem"><span class="ba-somatotype">{soma_type}</span>'
+                f'<span style="font-size:.75rem;color:var(--sub);margin-left:.75rem">{soma_desc}</span></div>',
+                unsafe_allow_html=True)
+
+            # ── Postural findings ─────────────────────────────────
+            st.markdown('<p class="ba-section">Postural Analysis</p>', unsafe_allow_html=True)
+
+            flags = []
+
+            # Forward head
+            fhp = posture.get("forward_head_cm", 0)
+            if fhp > 0:
+                cls = "ok" if fhp < 2 else "warn" if fhp < 4 else "bad"
+                icon = "✅" if fhp < 2 else "⚠️" if fhp < 4 else "🔴"
+                flags.append((cls, icon, "Forward Head Posture",
+                    f"{fhp} cm forward. " +
+                    ("Within normal range." if fhp < 2 else
+                     "Mild forward head — common with desk work. Chin tucks + thoracic extension will help." if fhp < 4 else
+                     "Significant forward head. Prioritise deep neck flexor strengthening and reduce screen time.")))
+
+            # Trunk lean
+            trunk = posture.get("trunk_forward_lean_deg", 0)
+            if trunk > 0:
+                cls = "ok" if trunk < 5 else "warn" if trunk < 12 else "bad"
+                icon = "✅" if trunk < 5 else "⚠️" if trunk < 12 else "🔴"
+                flags.append((cls, icon, "Trunk Posture",
+                    f"{trunk}° forward inclination. " +
+                    ("Neutral spine — excellent." if trunk < 5 else
+                     "Mild anterior lean — check hip flexor tightness and core activation." if trunk < 12 else
+                     "Significant forward lean. Prioritise hip flexor stretching, glute activation, and posterior chain work.")))
+
+            # Shoulder imbalance
+            sh_im = posture.get("shoulder_imbalance_cm", 0)
+            if sh_im > 0:
+                cls = "ok" if sh_im < 1.5 else "warn" if sh_im < 3 else "bad"
+                icon = "✅" if sh_im < 1.5 else "⚠️"
+                high = posture.get("shoulder_high_side", "")
+                flags.append((cls, icon, "Shoulder Level",
+                    f"{sh_im} cm difference — {high} side higher. " +
+                    ("Symmetrical — within normal variation." if sh_im < 1.5 else
+                     f"Mild imbalance — check unilateral pressing volume. Consider single-arm carries.")))
+
+            # Hip imbalance
+            hip_im = posture.get("hip_imbalance_cm", 0)
+            if hip_im > 0:
+                cls = "ok" if hip_im < 1 else "warn" if hip_im < 2.5 else "bad"
+                icon = "✅" if hip_im < 1 else "⚠️"
+                high_h = posture.get("hip_high_side", "")
+                flags.append((cls, icon, "Pelvic Level",
+                    f"{hip_im} cm difference — {high_h} hip higher. " +
+                    ("Symmetrical." if hip_im < 1 else
+                     f"Mild pelvic tilt — check {high_h.lower()} hip flexor tightness and opposite glute weakness.")))
+
+            # Knee alignment
+            kl = posture.get("knee_valgus_l", 0)
+            kr = posture.get("knee_valgus_r", 0)
+            if abs(kl) > 2 or abs(kr) > 2:
+                avg_v = (abs(kl) + abs(kr)) / 2
+                cls = "ok" if avg_v < 3 else "warn" if avg_v < 6 else "bad"
+                icon = "✅" if avg_v < 3 else "⚠️" if avg_v < 6 else "🔴"
+                flags.append((cls, icon, "Knee Alignment",
+                    f"L: {kl:+.1f}  R: {kr:+.1f} (% frame width). " +
+                    ("Knees track well over ankles." if avg_v < 3 else
+                     "Mild knee valgus — strengthen glutes and hip abductors. Focus on knee tracking during squats.")))
+
+            if not flags:
+                flags.append(("ok", "✅", "Posture Scan Complete",
+                    "Not enough landmark data for detailed postural analysis. "
+                    "Try a full-length photo with better lighting and fitted clothing."))
+
+            for cls, icon, title, body in flags:
+                st.markdown(
+                    f'<div class="ba-flag {cls}">'
+                    f'<div class="ba-flag-icon">{icon}</div>'
+                    f'<div><div class="ba-flag-title">{title}</div>'
+                    f'<div class="ba-flag-body">{body}</div></div></div>',
+                    unsafe_allow_html=True)
+
+            # ── Score bars ────────────────────────────────────────
+            st.markdown('<p class="ba-section">Fitness Readiness Profile</p>', unsafe_allow_html=True)
+
+            # Compute simple scores (0–100)
+            def clamp_score(v): return max(0, min(100, int(v)))
+
+            bmi_score  = clamp_score(100 - abs(bmi - 22) * 6)
+            bf_score   = clamp_score(100 - max(0, bf_pct - (10 if ba_sex=="Male" else 18)) * 3)
+            lean_score = clamp_score((ffmi / 25) * 100) if ba_sex=="Male" else clamp_score((ffmi / 22) * 100)
+            posture_score = clamp_score(100 - (fhp * 8) - (trunk * 2) - (sh_im * 6))
+            proportion_score = clamp_score(70 + (20 if ft_ratio and 0.8 < ft_ratio < 1.1 else 0) +
+                                            (10 if sh_w and hip_w and sh_w/hip_w > 1.1 else 0))
+
+            bars = [
+                ("Body Composition", bmi_score, "#3B82F6"),
+                ("Body Fat Level",   bf_score,  "#34D399"),
+                ("Lean Mass Index",  lean_score, "#60A5FA"),
+                ("Posture Quality",  posture_score, "#FBBF24"),
+                ("Proportions",      proportion_score, "#A78BFA"),
+            ]
+
+            bars_html = ""
+            for label, val, colour in bars:
+                bars_html += f"""<div class="ba-bar-row">
+                <div class="ba-bar-label">{label}</div>
+                <div class="ba-bar-track">
+                  <div class="ba-bar-fill" style="width:{val}%;background:{colour};"></div>
+                </div>
+                <div class="ba-bar-val">{val}</div>
+                </div>"""
+            st.markdown(bars_html, unsafe_allow_html=True)
+
+            st.markdown('</div>', unsafe_allow_html=True)  # close results zone
+
+            # ── AI Report ─────────────────────────────────────────
+            st.markdown('<div class="ba-zone">', unsafe_allow_html=True)
+            st.markdown('<p class="ba-section">Your AI Coach Report</p>', unsafe_allow_html=True)
+
+            with st.spinner("Generating personalised report with Groq LLM…"):
+                report_data = {
+                    "sex": ba_sex, "age": ba_age,
+                    "height_cm": ba_height, "weight_kg": ba_weight,
+                    "bmi": bmi, "bmi_cat": bmi_cat,
+                    "bf_pct": bf_pct, "bf_cat": bf_cat,
+                    "lean_kg": lean_kg, "fat_kg": fat_kg, "ffmi": ffmi,
+                    "shoulder_width_cm": sh_w, "hip_width_cm": hip_w,
+                    "femur_cm": femur_cm, "torso_cm": torso_cm,
+                    "somatotype": soma_type,
+                    "forward_head_cm": fhp,
+                    "trunk_lean": trunk,
+                    "shoulder_imbal": sh_im,
+                    "shoulder_high": posture.get("shoulder_high_side", "N/A"),
+                    "hip_imbal": hip_im,
+                    "hip_high": posture.get("hip_high_side", "N/A"),
+                    "knee_angle": posture.get("knee_angle_standing", "N/A"),
+                }
+                ai_report = ba_call_llm(report_data)
+
+            st.markdown(
+                f'<div class="ba-report-card">'
+                f'<div class="ba-report-title">🤖 Personalised Report — Powered by Groq LLM</div>'
+                f'<div class="ba-report-body">{ai_report}</div>'
+                f'</div>',
+                unsafe_allow_html=True)
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    else:
+        # Empty state
+        st.markdown("""
+        <div style="text-align:center;padding:4rem 1rem;color:var(--sub);">
+          <div style="font-size:3.5rem;margin-bottom:1rem;">🧍</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:1.1rem;font-weight:600;
+               color:var(--txt);margin-bottom:.5rem;">Upload a front photo to begin</div>
+          <div style="font-size:.82rem;max-width:320px;margin:0 auto;line-height:1.7;">
+          A full-length photo (head to toe) gives the best results.
+          Side view adds postural depth analysis.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)  # close main
+
+
+# TAB 4 — WORKOUT LIBRARY
 # ════════════════════════════════════════════
 with tab_library:
 
