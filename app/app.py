@@ -3074,7 +3074,7 @@ No bullet points — write in flowing paragraphs. Keep it under 300 words."""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{width:100%;height:100%;background:#07070F;overflow:hidden;font-family:'Inter',sans-serif;}
-#cam-container{position:relative;width:100%;height:100vh;background:#000;overflow:hidden;}
+#wrap{position:relative;width:100%;height:100vh;background:#000;overflow:hidden;}
 video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none;}
 video.normal{top:0;left:0;width:100%;height:100%;object-fit:cover;}
 video.normal.mirror{transform:scaleX(-1);}
@@ -3082,337 +3082,398 @@ video.portrait-fix{transform:translate(-50%,-50%) rotate(90deg);object-fit:cover
 video.portrait-fix.mirror{transform:translate(-50%,-50%) rotate(90deg) scaleX(-1);}
 canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
 
-/* ── CAM-OFF SCREEN ── */
-#cam-off{
-  position:absolute;top:0;left:0;right:0;bottom:0;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:1.2rem;z-index:30;background:#07070F;}
-#cam-off-title{
-  font-family:'Space Grotesk',sans-serif;font-size:1.4rem;font-weight:700;color:#fff;}
-#cam-off-sub{
-  font-size:.8rem;color:rgba(255,255,255,.45);text-align:center;
-  max-width:240px;line-height:1.6;}
-#btn-start{
-  background:linear-gradient(135deg,#1D4ED8,#3B82F6);
-  color:#fff;border:none;border-radius:14px;
-  font-family:'Space Grotesk',sans-serif;font-size:.95rem;font-weight:700;
-  padding:.85rem 2.2rem;cursor:pointer;
-  box-shadow:0 4px 24px rgba(59,130,246,.35);
-  transition:opacity .15s;}
-#btn-start:hover{opacity:.88;}
+/* OFF SCREEN */
+#cam-off{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:1.2rem;z-index:30;background:#07070F;}
+#btn-start{background:linear-gradient(135deg,#1D4ED8,#3B82F6);color:#fff;border:none;
+  border-radius:14px;font-family:'Space Grotesk',sans-serif;font-size:.95rem;font-weight:700;
+  padding:.85rem 2.2rem;cursor:pointer;box-shadow:0 4px 24px rgba(59,130,246,.35);}
 #btn-start:disabled{opacity:.5;cursor:default;}
+#err-msg{font-size:.72rem;color:#EF4444;display:none;text-align:center;max-width:240px;}
 
-/* ── TOP STATUS BAR ── */
-#status-bar{
-  position:absolute;top:0;left:0;right:0;display:none;
-  background:linear-gradient(to bottom,rgba(0,0,0,.82),transparent);
-  padding:1.1rem 1.2rem .9rem;z-index:20;
-  align-items:center;justify-content:space-between;}
-#status-bar.visible{display:flex;}
-#phase-label{
-  font-family:'Space Grotesk',sans-serif;font-size:.65rem;font-weight:700;
-  letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.4);}
-#phase-name{
-  font-family:'Space Grotesk',sans-serif;font-size:1.3rem;font-weight:700;
-  color:#fff;line-height:1;margin-top:.1rem;}
-#shot-dots{display:flex;gap:.5rem;}
+/* TOP BAR */
+#top-bar{position:absolute;top:0;left:0;right:0;display:none;z-index:20;
+  background:linear-gradient(to bottom,rgba(0,0,0,.85),transparent);
+  padding:1rem 1.2rem .8rem;align-items:flex-start;justify-content:space-between;}
+#top-bar.on{display:flex;}
+#phase-lbl{font-family:'Space Grotesk',sans-serif;font-size:.6rem;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.38);}
+#phase-name{font-family:'Space Grotesk',sans-serif;font-size:1.25rem;font-weight:700;color:#fff;line-height:1.1;}
+#dots{display:flex;gap:.5rem;padding-top:.2rem;}
 .dot{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.18);transition:background .3s;}
-.dot.done{background:#34D399;}
-.dot.active{background:#3B82F6;box-shadow:0 0 8px rgba(59,130,246,.7);}
+.dot.done{background:#34D399;} .dot.active{background:#3B82F6;box-shadow:0 0 8px rgba(59,130,246,.8);}
 
-/* ── BOTTOM GESTURE BOX ── */
-#gesture-box{
-  position:absolute;bottom:0;left:0;right:0;display:none;
-  background:linear-gradient(to top,rgba(0,0,0,.9) 0%,rgba(0,0,0,.6) 60%,transparent 100%);
-  padding:1.5rem 1.2rem 2rem;z-index:20;
-  flex-direction:column;align-items:center;gap:.75rem;}
-#gesture-box.visible{display:flex;}
-
-/* Ring */
-#ring-wrap{position:relative;width:84px;height:84px;}
+/* BOTTOM INSTRUCTION */
+#instr{position:absolute;bottom:0;left:0;right:0;display:none;z-index:20;
+  background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.55) 65%,transparent 100%);
+  padding:1.4rem 1rem 2rem;flex-direction:column;align-items:center;gap:.7rem;}
+#instr.on{display:flex;}
+#ring-wrap{position:relative;width:82px;height:82px;}
 #ring-wrap svg{position:absolute;top:0;left:0;width:100%;height:100%;}
-#ring-num{
-  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  font-family:'Space Grotesk',sans-serif;font-size:1.9rem;font-weight:700;
-  color:#fff;line-height:1;transition:color .2s;}
+#ring-num{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-family:'Space Grotesk',sans-serif;font-size:1.85rem;font-weight:700;color:#fff;}
 #ring-wrap.counting #ring-num{color:#3B82F6;}
-#ring-wrap.done     #ring-num{color:#34D399;}
-
-#gesture-text{
-  font-size:.84rem;font-weight:600;color:rgba(255,255,255,.9);
+#ring-wrap.done #ring-num{color:#34D399;}
+#instr-text{font-size:.82rem;font-weight:600;color:rgba(255,255,255,.88);
   text-align:center;line-height:1.55;max-width:260px;}
-#gesture-hint{
-  font-size:.68rem;color:rgba(255,255,255,.38);text-align:center;}
+#instr-sub{font-size:.66rem;color:rgba(255,255,255,.35);text-align:center;}
 
-/* ── FLASH ── */
-#flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:50;transition:opacity .07s;}
+/* WAITING — hand must come down before capture */
+#wait-msg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:rgba(0,0,0,.88);border-radius:16px;padding:1.2rem 2rem;z-index:35;
+  text-align:center;display:none;}
+#wait-msg.on{display:block;}
+#wait-icon{font-size:2rem;margin-bottom:.4rem;}
+#wait-text{font-family:'Space Grotesk',sans-serif;font-size:.95rem;font-weight:700;
+  color:#34D399;margin-bottom:.2rem;}
+#wait-sub{font-size:.7rem;color:rgba(255,255,255,.5);line-height:1.5;}
 
-/* ── DONE OVERLAY ── */
-#done-overlay{
-  position:absolute;inset:0;background:rgba(7,7,15,.9);z-index:60;
-  display:none;flex-direction:column;align-items:center;justify-content:center;
-  gap:1.25rem;padding:2rem;}
-#done-overlay.visible{display:flex;}
-#done-title{
-  font-family:'Space Grotesk',sans-serif;font-size:1.5rem;font-weight:700;
-  color:#34D399;text-align:center;}
-#done-sub{font-size:.8rem;color:rgba(255,255,255,.55);text-align:center;line-height:1.6;}
-#thumbs-wrap{display:flex;gap:1rem;margin-top:.25rem;}
-.thumb-col{display:flex;flex-direction:column;align-items:center;gap:.4rem;}
-.thumb-box{border-radius:10px;overflow:hidden;width:110px;height:150px;
-  border:1.5px solid rgba(255,255,255,.15);}
-.thumb-box img{width:100%;height:100%;object-fit:cover;}
-.thumb-lbl{font-size:.58rem;color:rgba(255,255,255,.35);
-  text-transform:uppercase;letter-spacing:.1em;}
-
-/* ── TRANSITION MSG ── */
-#turn-msg{
-  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  background:rgba(0,0,0,.88);border-radius:18px;padding:1.5rem 2.5rem;
+/* TURN SIDEWAYS */
+#turn-msg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:rgba(0,0,0,.9);border-radius:18px;padding:1.5rem 2.5rem;
   z-index:40;text-align:center;display:none;}
-#turn-msg.visible{display:block;}
-#turn-msg-icon{font-size:2.2rem;margin-bottom:.5rem;}
-#turn-msg-text{
-  font-family:'Space Grotesk',sans-serif;font-size:1rem;font-weight:700;
-  color:#fff;margin-bottom:.3rem;}
-#turn-msg-sub{font-size:.72rem;color:rgba(255,255,255,.5);}
+#turn-msg.on{display:block;}
+
+/* FLASH */
+#flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:50;transition:opacity .06s;}
+
+/* DONE */
+#done-ov{position:absolute;inset:0;background:rgba(7,7,15,.92);z-index:60;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  gap:1.1rem;padding:2rem;}
+#done-ov.on{display:flex;}
+#done-title{font-family:'Space Grotesk',sans-serif;font-size:1.4rem;font-weight:700;color:#34D399;text-align:center;}
+#thumbs{display:flex;gap:1rem;}
+.tcol{display:flex;flex-direction:column;align-items:center;gap:.35rem;}
+.tbox{border-radius:10px;overflow:hidden;width:105px;height:145px;border:1.5px solid rgba(255,255,255,.15);}
+.tbox img{width:100%;height:100%;object-fit:cover;}
+.tlbl{font-size:.58rem;color:rgba(255,255,255,.32);text-transform:uppercase;letter-spacing:.1em;}
 </style>
 </head>
 <body>
-<div id="cam-container">
+<div id="wrap">
   <video id="video" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
   <div id="flash"></div>
 
-  <!-- Off screen -->
   <div id="cam-off">
     <div style="font-size:2.8rem">📷</div>
-    <div id="cam-off-title">Body Assessment Camera</div>
-    <div id="cam-off-sub">Stand 2–3 m away · Full body visible · Fitted clothing</div>
-    <button id="btn-start" onclick="startCapture()">Start Camera</button>
-    <div id="err-msg" style="font-size:.72rem;color:#EF4444;display:none;text-align:center;max-width:240px;"></div>
+    <div style="font-family:'Space Grotesk',sans-serif;font-size:1.3rem;font-weight:700;color:#fff">Body Assessment</div>
+    <div style="font-size:.78rem;color:rgba(255,255,255,.42);text-align:center;max-width:230px;line-height:1.65">
+      Stand 2–3 m away · Full body visible<br>Fitted clothing · Flat surface
+    </div>
+    <button id="btn-start" onclick="startCam()">Start Camera</button>
+    <div id="err-msg"></div>
   </div>
 
-  <!-- Top bar (hidden until camera on) -->
-  <div id="status-bar">
+  <div id="top-bar">
     <div>
-      <div id="phase-label">CAPTURING</div>
+      <div id="phase-lbl">CAPTURING</div>
       <div id="phase-name">Front View</div>
     </div>
-    <div id="shot-dots">
+    <div id="dots">
       <div class="dot active" id="dot0"></div>
       <div class="dot"        id="dot1"></div>
     </div>
   </div>
 
-  <!-- Turn msg -->
-  <div id="turn-msg">
-    <div id="turn-msg-icon">↩️</div>
-    <div id="turn-msg-text">Turn sideways</div>
-    <div id="turn-msg-sub">Face left or right, then raise one hand</div>
-  </div>
-
-  <!-- Bottom gesture box -->
-  <div id="gesture-box">
+  <div id="instr">
     <div id="ring-wrap">
-      <svg viewBox="0 0 84 84">
-        <circle cx="42" cy="42" r="36" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="6"/>
-        <circle id="ring-arc" cx="42" cy="42" r="36" fill="none"
-          stroke="#3B82F6" stroke-width="6"
-          stroke-dasharray="226" stroke-dashoffset="226"
-          stroke-linecap="round" transform="rotate(-90 42 42)"/>
+      <svg viewBox="0 0 82 82">
+        <circle cx="41" cy="41" r="35" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="6"/>
+        <circle id="ring-arc" cx="41" cy="41" r="35" fill="none"
+          stroke="#3B82F6" stroke-width="6" stroke-dasharray="220" stroke-dashoffset="220"
+          stroke-linecap="round" transform="rotate(-90 41 41)"/>
       </svg>
-      <div id="ring-num">✋</div>
+      <div id="ring-num">&#9997;</div>
     </div>
-    <div id="gesture-text">Raise one hand above your head<br>and hold for <strong>5 seconds</strong></div>
-    <div id="gesture-hint">Front photo · Shot 1 of 2</div>
+    <div id="instr-text">Raise one hand above your shoulder<br>and hold for <strong>5 seconds</strong></div>
+    <div id="instr-sub" id="shot-sub">Front photo &middot; Shot 1 of 2</div>
   </div>
 
-  <!-- Done overlay -->
-  <div id="done-overlay">
-    <div id="done-title">✅ Both shots captured!</div>
-    <div id="done-sub">Scroll down and click<br><strong>Analyse My Body</strong></div>
-    <div id="thumbs-wrap">
-      <div class="thumb-col">
-        <div class="thumb-box"><img id="thumb-front" src="data:,"/></div>
-        <div class="thumb-lbl">Front</div>
-      </div>
-      <div class="thumb-col">
-        <div class="thumb-box"><img id="thumb-side" src="data:,"/></div>
-        <div class="thumb-lbl">Side</div>
-      </div>
+  <div id="wait-msg">
+    <div id="wait-icon">&#10003;</div>
+    <div id="wait-text">Good! Now lower your hand</div>
+    <div id="wait-sub">Photo will be taken<br>when your arm is down</div>
+  </div>
+
+  <div id="turn-msg">
+    <div style="font-size:2rem;margin-bottom:.5rem">&#x21A9;&#xFE0F;</div>
+    <div style="font-family:'Space Grotesk',sans-serif;font-size:1rem;font-weight:700;color:#fff;margin-bottom:.25rem">Turn sideways</div>
+    <div style="font-size:.72rem;color:rgba(255,255,255,.48);line-height:1.55">Face left or right<br>then raise one hand again</div>
+  </div>
+
+  <div id="done-ov">
+    <div id="done-title">&#10003; Both shots captured!</div>
+    <div style="font-size:.78rem;color:rgba(255,255,255,.5);text-align:center;line-height:1.6">
+      Scroll down and click<br><strong style="color:#fff">Analyse My Body</strong>
+    </div>
+    <div id="thumbs">
+      <div class="tcol"><div class="tbox"><img id="tf" src="data:,"/></div><div class="tlbl">Front</div></div>
+      <div class="tcol"><div class="tbox"><img id="ts" src="data:,"/></div><div class="tlbl">Side</div></div>
     </div>
   </div>
 </div>
 
-<!-- TF.js + MoveNet — exact same versions as Live Trainer -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
 <script>
-const HOLD_SECS=5, CIRC=226;
-let phase='front',detector=null,stream=null,rafId=null;
-let holdStart=null,holdActive=false,imgFront=null,imgSide=null;
-const MV={NOSE:0,L_SH:5,R_SH:6,L_EL:7,R_EL:8,L_WR:9,R_WR:10,
-          L_HIP:11,R_HIP:12,L_KN:13,R_KN:14,L_AN:15,R_AN:16};
+// ── Constants ────────────────────────────────────────────────────
+const HOLD_SECS = 5;
+const CIRC      = 220;
+const MV = {NOSE:0,L_EY:1,R_EY:2,L_EAR:3,R_EAR:4,
+            L_SH:5,R_SH:6,L_EL:7,R_EL:8,L_WR:9,R_WR:10,
+            L_HIP:11,R_HIP:12,L_KN:13,R_KN:14,L_AN:15,R_AN:16};
 const CONNS=[[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],
              [11,13],[13,15],[12,14],[14,16]];
 
-async function startCapture(){
-  const btn=document.getElementById('btn-start');
-  const err=document.getElementById('err-msg');
-  btn.textContent='Loading…';btn.disabled=true;err.style.display='none';
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'user'}}})
-      .catch(()=>navigator.mediaDevices.getUserMedia({audio:false,video:true}));
-    const video=document.getElementById('video');
-    video.srcObject=stream;
-    await new Promise(r=>video.onloadedmetadata=r);
-    video.play();
-    applyVideoOrientation(video);
-    document.getElementById('cam-off').style.display='none';
-    document.getElementById('status-bar').classList.add('visible');
-    document.getElementById('gesture-box').classList.add('visible');
-    detector=await poseDetection.createDetector(
+// ── State ────────────────────────────────────────────────────────
+// phase: 'front_wait' -> 'front_hold' -> 'front_lower' -> 'side_prompt'
+//     -> 'side_wait' -> 'side_hold' -> 'side_lower' -> 'done'
+let phase      = 'off';
+let detector   = null;
+let rafId      = null;
+let holdStart  = null;
+let imgFront   = null;
+let imgSide    = null;
+
+// ── Camera start ─────────────────────────────────────────────────
+async function startCam(){
+  const btn = document.getElementById('btn-start');
+  const err = document.getElementById('err-msg');
+  btn.textContent = 'Starting\u2026'; btn.disabled = true;
+  err.style.display = 'none';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false, video: { facingMode: { ideal: 'user' } }
+    }).catch(() => navigator.mediaDevices.getUserMedia({ audio: false, video: true }));
+
+    const vid = document.getElementById('video');
+    vid.srcObject = stream;
+    await new Promise(r => vid.onloadedmetadata = r);
+    vid.play();
+    applyOrientation(vid);
+
+    document.getElementById('cam-off').style.display = 'none';
+    document.getElementById('top-bar').classList.add('on');
+    document.getElementById('instr').classList.add('on');
+
+    detector = await poseDetection.createDetector(
       poseDetection.SupportedModels.MoveNet,
-      {modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,enableSmoothing:true}
+      { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING, enableSmoothing: true }
     );
+    phase = 'front_wait';
     detect();
-  }catch(e){
-    btn.textContent='Start Camera';btn.disabled=false;
-    err.textContent='Camera error: '+(e.message||e);err.style.display='block';
+  } catch(e) {
+    btn.textContent = 'Start Camera'; btn.disabled = false;
+    err.textContent = 'Camera error: ' + (e.message || e);
+    err.style.display = 'block';
   }
 }
 
-function applyVideoOrientation(video){
-  const vW=video.videoWidth,vH=video.videoHeight,needsRotate=vW>vH;
-  const c=document.getElementById('cam-container');
-  const cW=c.offsetWidth,cH=c.offsetHeight;
-  if(needsRotate){
-    video.style.cssText='position:absolute;top:50%;left:50%;object-fit:cover;';
-    video.style.width=cH+'px';video.style.height=cW+'px';
-    video.className='portrait-fix mirror';
-  }else{
-    video.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;';
-    video.className='normal mirror';
+// ── Video orientation (copy from Live Trainer) ───────────────────
+function applyOrientation(vid){
+  const vW = vid.videoWidth, vH = vid.videoHeight;
+  const c  = document.getElementById('wrap');
+  const cW = c.offsetWidth, cH = c.offsetHeight;
+  if(vW > vH){
+    vid.style.cssText = 'position:absolute;top:50%;left:50%;object-fit:cover;';
+    vid.style.width = cH+'px'; vid.style.height = cW+'px';
+    vid.className = 'portrait-fix mirror';
+  } else {
+    vid.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;';
+    vid.className = 'normal mirror';
   }
 }
 
-function drawSkel(ctx,kp,vW,vH,rW,rH,offX,offY){
-  const px=i=>kp[i]?offX+(rW-kp[i].x/vW*rW):0;
-  const py=i=>kp[i]?offY+kp[i].y/vH*rH:0;
-  const vs=i=>kp[i]?kp[i].score:0;
-  ctx.lineWidth=4;ctx.lineCap='round';
-  for(const[a,b]of CONNS){
-    if(vs(a)<0.25||vs(b)<0.25)continue;
-    ctx.globalAlpha=0.9;ctx.strokeStyle='#3B82F6';
-    ctx.shadowColor='#3B82F6';ctx.shadowBlur=8;
-    ctx.beginPath();ctx.moveTo(px(a),py(a));ctx.lineTo(px(b),py(b));ctx.stroke();
+// ── Skeleton drawing ─────────────────────────────────────────────
+function drawSkel(ctx, kp, vW, vH, rW, rH, ox, oy){
+  const px = i => kp[i] ? ox + (rW - kp[i].x/vW*rW) : 0;
+  const py = i => kp[i] ? oy + kp[i].y/vH*rH        : 0;
+  const vs = i => kp[i] ? kp[i].score : 0;
+  ctx.lineWidth=3.5; ctx.lineCap='round';
+  for(const [a,b] of CONNS){
+    if(vs(a)<0.2||vs(b)<0.2) continue;
+    ctx.globalAlpha=0.85; ctx.strokeStyle='#3B82F6';
+    ctx.shadowColor='#3B82F6'; ctx.shadowBlur=6;
+    ctx.beginPath(); ctx.moveTo(px(a),py(a)); ctx.lineTo(px(b),py(b)); ctx.stroke();
   }
-  ctx.globalAlpha=1;ctx.shadowBlur=0;
+  ctx.globalAlpha=1; ctx.shadowBlur=0;
   for(let i=5;i<=16;i++){
-    if(vs(i)<0.25)continue;
-    ctx.beginPath();ctx.arc(px(i),py(i),5,0,Math.PI*2);
-    ctx.fillStyle='#60A5FA';ctx.fill();
+    if(vs(i)<0.2) continue;
+    ctx.beginPath(); ctx.arc(px(i),py(i),4.5,0,Math.PI*2);
+    ctx.fillStyle='#60A5FA'; ctx.fill();
   }
 }
 
-function isHandRaised(kp){
-  // Mirror of Live Trainer checkGesture — raw pixel y, wrist above shoulder
-  // ONE hand raised = either wrist clearly above its shoulder
-  const lw=kp[MV.L_WR],rw=kp[MV.R_WR];
-  const ls=kp[MV.L_SH],rs=kp[MV.R_SH];
-  if(!ls||!rs) return false;
-  if(ls.score<0.2||rs.score<0.2) return false;
-  const lRaised = lw && lw.score>0.2 && lw.y < ls.y - 10;
-  const rRaised = rw && rw.score>0.2 && rw.y < rs.y - 10;
-  return lRaised || rRaised;
+// ── Gesture: one wrist above its shoulder (raw pixel y) ──────────
+function handUp(kp){
+  const lw=kp[MV.L_WR], rw=kp[MV.R_WR];
+  const ls=kp[MV.L_SH], rs=kp[MV.R_SH];
+  if(!ls||!rs||ls.score<0.2||rs.score<0.2) return false;
+  const lUp = lw && lw.score>0.2 && lw.y < ls.y - 15;
+  const rUp = rw && rw.score>0.2 && rw.y < rs.y - 15;
+  return lUp || rUp;
 }
 
+function handDown(kp){
+  // both wrists below their shoulder — arm is relaxed
+  const lw=kp[MV.L_WR], rw=kp[MV.R_WR];
+  const ls=kp[MV.L_SH], rs=kp[MV.R_SH];
+  if(!ls||!rs) return true;
+  const lDown = !lw || lw.score<0.15 || lw.y > ls.y + 10;
+  const rDown = !rw || rw.score<0.15 || rw.y > rs.y + 10;
+  return lDown && rDown;
+}
+
+// ── Ring ─────────────────────────────────────────────────────────
 function setRing(pct){
-  const arc=document.getElementById('ring-arc');
-  const num=document.getElementById('ring-num');
-  const wrap=document.getElementById('ring-wrap');
-  arc.style.strokeDashoffset=CIRC*(1-pct);
-  if(pct<=0){arc.style.stroke='rgba(255,255,255,.15)';wrap.className='';num.textContent='✋';}
-  else if(pct>=1){arc.style.stroke='#34D399';wrap.className='done';num.textContent='✓';}
-  else{arc.style.stroke='#3B82F6';wrap.className='counting';num.textContent=Math.ceil(HOLD_SECS*(1-pct));}
+  const arc  = document.getElementById('ring-arc');
+  const num  = document.getElementById('ring-num');
+  const wrap = document.getElementById('ring-wrap');
+  arc.style.strokeDashoffset = CIRC*(1-pct);
+  if(pct<=0){
+    arc.style.stroke='rgba(255,255,255,.15)'; wrap.className=''; num.innerHTML='&#9997;';
+  } else if(pct>=1){
+    arc.style.stroke='#34D399'; wrap.className='done'; num.innerHTML='&#10003;';
+  } else {
+    arc.style.stroke='#3B82F6'; wrap.className='counting';
+    num.textContent=Math.ceil(HOLD_SECS*(1-pct));
+  }
 }
 
-function captureFrame(){
-  const video=document.getElementById('video');
+// ── Capture current frame (mirrored like display) ─────────────────
+function capture(){
+  const vid=document.getElementById('video');
   const fl=document.getElementById('flash');
-  fl.style.opacity='1';setTimeout(()=>fl.style.opacity='0',100);
-  const cap=document.createElement('canvas');
-  cap.width=video.videoWidth;cap.height=video.videoHeight;
-  const c2=cap.getContext('2d');
-  c2.save();c2.scale(-1,1);c2.translate(-cap.width,0);
-  c2.drawImage(video,0,0);c2.restore();
-  return cap.toDataURL('image/jpeg',0.92);
+  fl.style.opacity='1'; setTimeout(()=>fl.style.opacity='0',90);
+  const c=document.createElement('canvas');
+  c.width=vid.videoWidth; c.height=vid.videoHeight;
+  const cx=c.getContext('2d');
+  cx.save(); cx.scale(-1,1); cx.translate(-c.width,0);
+  cx.drawImage(vid,0,0); cx.restore();
+  return c.toDataURL('image/jpeg',0.93);
 }
 
-function goSide(){
-  phase='side';holdStart=null;holdActive=false;setRing(0);
-  document.getElementById('phase-name').textContent='Side View';
-  document.getElementById('gesture-hint').textContent='Side photo · Shot 2 of 2';
-  document.getElementById('dot0').className='dot done';
-  document.getElementById('dot1').className='dot active';
-  const msg=document.getElementById('turn-msg');
-  msg.classList.add('visible');setTimeout(()=>msg.classList.remove('visible'),2500);
+// ── UI helpers ────────────────────────────────────────────────────
+function showWait(on){   document.getElementById('wait-msg').className=on?'on':''; }
+function showTurn(on){   document.getElementById('turn-msg').className=on?'on':''; }
+function setPhaseUI(name, shotText, dot0cls, dot1cls){
+  document.getElementById('phase-name').textContent = name;
+  document.getElementById('instr-sub').textContent  = shotText;
+  document.getElementById('dot0').className = 'dot '+dot0cls;
+  document.getElementById('dot1').className = 'dot '+dot1cls;
 }
 
-function goDone(){
-  phase='done';cancelAnimationFrame(rafId);
-  document.getElementById('gesture-box').classList.remove('visible');
-  document.getElementById('status-bar').classList.remove('visible');
-  document.getElementById('thumb-front').src=imgFront;
-  document.getElementById('thumb-side').src=imgSide;
-  document.getElementById('done-overlay').classList.add('visible');
-  setTimeout(()=>window.parent.postMessage({type:'ba_photos',front:imgFront,side:imgSide},'*'),500);
-}
-
+// ── Main detect loop ──────────────────────────────────────────────
 async function detect(){
-  if(phase==='done')return;
-  const video=document.getElementById('video');
-  const canvas=document.getElementById('canvas');
-  const ctx=canvas.getContext('2d');
-  const _vW=video.videoWidth||640,_vH=video.videoHeight||480;
-  const rotated=video.className.includes('portrait-fix');
-  const vW=rotated?_vH:_vW,vH=rotated?_vW:_vH;
-  const cW=canvas.offsetWidth||canvas.width,cH=canvas.offsetHeight||canvas.height;
-  canvas.width=cW;canvas.height=cH;
-  const scale=Math.max(cW/vW,cH/vH);
-  const rW=vW*scale,rH=vH*scale,offX=(cW-rW)/2,offY=(cH-rH)/2;
+  if(phase==='done') return;
+  const vid    = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx    = canvas.getContext('2d');
+
+  const _vW=vid.videoWidth||640, _vH=vid.videoHeight||480;
+  const rotated = vid.className.includes('portrait-fix');
+  const vW=rotated?_vH:_vW, vH=rotated?_vW:_vH;
+  const cW=canvas.offsetWidth||640, cH=canvas.offsetHeight||480;
+  canvas.width=cW; canvas.height=cH;
+  const sc=Math.max(cW/vW,cH/vH);
+  const rW=vW*sc, rH=vH*sc, ox=(cW-rW)/2, oy=(cH-rH)/2;
   ctx.clearRect(0,0,cW,cH);
-  try{
-    if(detector&&video.readyState>=2){
-      const poses=await detector.estimatePoses(video,{flipHorizontal:true});
+
+  try {
+    if(detector && vid.readyState>=2){
+      const poses = await detector.estimatePoses(vid,{flipHorizontal:true});
       if(poses.length>0){
-        const kp=poses[0].keypoints;
-        drawSkel(ctx,kp,vW,vH,rW,rH,offX,offY);
-        const raised=isHandRaised(kp);
-        if(raised){
-          if(!holdActive){holdActive=true;holdStart=performance.now();}
-          const pct=Math.min((performance.now()-holdStart)/1000/HOLD_SECS,1);
-          setRing(pct);
-          if(pct>=1){
-            const url=captureFrame();
-            if(phase==='front'){imgFront=url;goSide();}
-            else{imgSide=url;goDone();return;}
+        const kp = poses[0].keypoints;
+        drawSkel(ctx, kp, vW, vH, rW, rH, ox, oy);
+        const up   = handUp(kp);
+        const down = handDown(kp);
+
+        // ── FRONT: waiting for hand up ──────────────────────────
+        if(phase==='front_wait'){
+          setRing(0);
+          if(up){ phase='front_hold'; holdStart=performance.now(); }
+
+        // ── FRONT: counting down ────────────────────────────────
+        } else if(phase==='front_hold'){
+          if(!up){ phase='front_wait'; holdStart=null; setRing(0); }
+          else {
+            const pct=Math.min((performance.now()-holdStart)/1000/HOLD_SECS,1);
+            setRing(pct);
+            if(pct>=1){
+              // Ring done — wait for hand to lower, then snap
+              phase='front_lower';
+              showWait(true);
+            }
           }
-        }else{holdActive=false;holdStart=null;setRing(0);}
-      }else{
-        ctx.font='bold 14px Inter,sans-serif';ctx.fillStyle='rgba(255,255,255,.35)';
+
+        // ── FRONT: wait for hand down, then capture ─────────────
+        } else if(phase==='front_lower'){
+          if(down){
+            showWait(false);
+            imgFront = capture();
+            // Transition to side
+            phase='side_prompt';
+            setPhaseUI('Side View','Side photo \u00b7 Shot 2 of 2','done','active');
+            setRing(0);
+            showTurn(true);
+            setTimeout(()=>{ showTurn(false); phase='side_wait'; }, 3000);
+          }
+
+        // ── SIDE: waiting for hand up ───────────────────────────
+        } else if(phase==='side_wait'){
+          if(up){ phase='side_hold'; holdStart=performance.now(); }
+
+        // ── SIDE: counting down ─────────────────────────────────
+        } else if(phase==='side_hold'){
+          if(!up){ phase='side_wait'; holdStart=null; setRing(0); }
+          else {
+            const pct=Math.min((performance.now()-holdStart)/1000/HOLD_SECS,1);
+            setRing(pct);
+            if(pct>=1){
+              phase='side_lower';
+              showWait(true);
+            }
+          }
+
+        // ── SIDE: wait for hand down, then capture ──────────────
+        } else if(phase==='side_lower'){
+          if(down){
+            showWait(false);
+            imgSide = capture();
+            phase='done';
+            cancelAnimationFrame(rafId);
+            // Show done overlay
+            document.getElementById('tf').src = imgFront;
+            document.getElementById('ts').src = imgSide;
+            document.getElementById('instr').classList.remove('on');
+            document.getElementById('top-bar').classList.remove('on');
+            document.getElementById('done-ov').classList.add('on');
+            // Send to Streamlit
+            setTimeout(()=>{
+              window.parent.postMessage({type:'ba_photos',front:imgFront,side:imgSide},'*');
+            }, 400);
+            return;
+          }
+        }
+
+      } else {
+        // No person in frame
+        ctx.font='bold 13px Inter,sans-serif';
+        ctx.fillStyle='rgba(255,255,255,.32)';
         ctx.textAlign='center';
-        ctx.fillText('Point camera at your full body',cW/2,cH/2);
+        ctx.fillText('Point camera at your full body',cW/2,cH*.5);
       }
     }
-  }catch(e){console.warn('detect:',e);}
-  rafId=requestAnimationFrame(detect);
+  } catch(e){ console.warn(e); }
+
+  rafId = requestAnimationFrame(detect);
 }
 
 window.addEventListener('resize',()=>{
   const v=document.getElementById('video');
-  if(v.srcObject)applyVideoOrientation(v);
+  if(v.srcObject) applyOrientation(v);
 });
 </script>
 </body></html>"""
