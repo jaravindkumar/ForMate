@@ -3316,13 +3316,16 @@ function drawSkel(ctx,kp,vW,vH,rW,rH,offX,offY){
   }
 }
 
-function isHandRaised(kp,vH){
-  const nose=kp[0],lw=kp[9],rw=kp[10];
-  if(!nose||nose.score<0.3)return false;
-  const nY=nose.y/vH;
-  const lY=lw&&lw.score>0.25?lw.y/vH:1;
-  const rY=rw&&rw.score>0.25?rw.y/vH:1;
-  return lY<nY-0.08||rY<nY-0.08;
+function isHandRaised(kp){
+  // Mirror of Live Trainer checkGesture — raw pixel y, wrist above shoulder
+  // ONE hand raised = either wrist clearly above its shoulder
+  const lw=kp[MV.L_WR],rw=kp[MV.R_WR];
+  const ls=kp[MV.L_SH],rs=kp[MV.R_SH];
+  if(!ls||!rs) return false;
+  if(ls.score<0.2||rs.score<0.2) return false;
+  const lRaised = lw && lw.score>0.2 && lw.y < ls.y - 10;
+  const rRaised = rw && rw.score>0.2 && rw.y < rs.y - 10;
+  return lRaised || rRaised;
 }
 
 function setRing(pct){
@@ -3386,7 +3389,7 @@ async function detect(){
       if(poses.length>0){
         const kp=poses[0].keypoints;
         drawSkel(ctx,kp,vW,vH,rW,rH,offX,offY);
-        const raised=isHandRaised(kp,vH);
+        const raised=isHandRaised(kp);
         if(raised){
           if(!holdActive){holdActive=true;holdStart=performance.now();}
           const pct=Math.min((performance.now()-holdStart)/1000/HOLD_SECS,1);
