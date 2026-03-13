@@ -3073,85 +3073,127 @@ No bullet points — write in flowing paragraphs. Keep it under 300 words."""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:'Inter',sans-serif;}
-#wrap{position:relative;width:100%;height:100vh;}
-video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
-canvas#ov{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
+html,body{width:100%;height:100%;background:#07070F;overflow:hidden;font-family:'Inter',sans-serif;}
+#cam-container{position:relative;width:100%;height:100vh;background:#000;overflow:hidden;}
+video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none;}
+video.normal{top:0;left:0;width:100%;height:100%;object-fit:cover;}
+video.normal.mirror{transform:scaleX(-1);}
+video.portrait-fix{transform:translate(-50%,-50%) rotate(90deg);object-fit:cover;}
+video.portrait-fix.mirror{transform:translate(-50%,-50%) rotate(90deg) scaleX(-1);}
+canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
+
+/* ── CAM-OFF SCREEN ── */
+#cam-off{
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1.2rem;z-index:30;background:#07070F;}
+#cam-off-title{
+  font-family:'Space Grotesk',sans-serif;font-size:1.4rem;font-weight:700;color:#fff;}
+#cam-off-sub{
+  font-size:.8rem;color:rgba(255,255,255,.45);text-align:center;
+  max-width:240px;line-height:1.6;}
+#btn-start{
+  background:linear-gradient(135deg,#1D4ED8,#3B82F6);
+  color:#fff;border:none;border-radius:14px;
+  font-family:'Space Grotesk',sans-serif;font-size:.95rem;font-weight:700;
+  padding:.85rem 2.2rem;cursor:pointer;
+  box-shadow:0 4px 24px rgba(59,130,246,.35);
+  transition:opacity .15s;}
+#btn-start:hover{opacity:.88;}
+#btn-start:disabled{opacity:.5;cursor:default;}
 
 /* ── TOP STATUS BAR ── */
 #status-bar{
-  position:absolute;top:0;left:0;right:0;
+  position:absolute;top:0;left:0;right:0;display:none;
   background:linear-gradient(to bottom,rgba(0,0,0,.82),transparent);
   padding:1.1rem 1.2rem .9rem;z-index:20;
-  display:flex;align-items:center;justify-content:space-between;}
+  align-items:center;justify-content:space-between;}
+#status-bar.visible{display:flex;}
 #phase-label{
-  font-family:'Space Grotesk',sans-serif;font-size:.7rem;font-weight:700;
-  letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.45);}
+  font-family:'Space Grotesk',sans-serif;font-size:.65rem;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.4);}
 #phase-name{
   font-family:'Space Grotesk',sans-serif;font-size:1.3rem;font-weight:700;
-  color:#fff;line-height:1;margin-top:.15rem;}
+  color:#fff;line-height:1;margin-top:.1rem;}
 #shot-dots{display:flex;gap:.5rem;}
-.dot{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.18);
-     transition:background .3s;}
+.dot{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.18);transition:background .3s;}
 .dot.done{background:#34D399;}
-.dot.active{background:#3B82F6;box-shadow:0 0 8px #3B82F6;}
+.dot.active{background:#3B82F6;box-shadow:0 0 8px rgba(59,130,246,.7);}
 
-/* ── GESTURE INSTRUCTION ── */
+/* ── BOTTOM GESTURE BOX ── */
 #gesture-box{
-  position:absolute;bottom:0;left:0;right:0;
-  background:linear-gradient(to top,rgba(0,0,0,.88),transparent);
-  padding:1.5rem 1.2rem 1.8rem;z-index:20;
-  display:flex;flex-direction:column;align-items:center;gap:.6rem;}
-#gesture-icon{font-size:2.4rem;line-height:1;}
-#gesture-text{
-  font-size:.82rem;font-weight:600;color:rgba(255,255,255,.85);
-  text-align:center;line-height:1.5;max-width:260px;}
-#gesture-sub{
-  font-size:.68rem;color:rgba(255,255,255,.4);text-align:center;}
+  position:absolute;bottom:0;left:0;right:0;display:none;
+  background:linear-gradient(to top,rgba(0,0,0,.9) 0%,rgba(0,0,0,.6) 60%,transparent 100%);
+  padding:1.5rem 1.2rem 2rem;z-index:20;
+  flex-direction:column;align-items:center;gap:.75rem;}
+#gesture-box.visible{display:flex;}
 
-/* ── COUNTDOWN RING ── */
-#ring-wrap{position:relative;width:88px;height:88px;}
+/* Ring */
+#ring-wrap{position:relative;width:84px;height:84px;}
 #ring-wrap svg{position:absolute;top:0;left:0;width:100%;height:100%;}
 #ring-num{
   position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  font-family:'Space Grotesk',sans-serif;font-size:2rem;font-weight:700;
-  color:#fff;line-height:1;}
-#ring-wrap.active #ring-num{color:#3B82F6;}
-#ring-wrap.done   #ring-num{color:#34D399;}
+  font-family:'Space Grotesk',sans-serif;font-size:1.9rem;font-weight:700;
+  color:#fff;line-height:1;transition:color .2s;}
+#ring-wrap.counting #ring-num{color:#3B82F6;}
+#ring-wrap.done     #ring-num{color:#34D399;}
 
-/* ── FLASH overlay ── */
-#flash{
-  position:absolute;top:0;left:0;right:0;bottom:0;
-  background:#fff;opacity:0;pointer-events:none;z-index:50;
-  transition:opacity .08s;}
+#gesture-text{
+  font-size:.84rem;font-weight:600;color:rgba(255,255,255,.9);
+  text-align:center;line-height:1.55;max-width:260px;}
+#gesture-hint{
+  font-size:.68rem;color:rgba(255,255,255,.38);text-align:center;}
 
-/* ── DONE STATE ── */
+/* ── FLASH ── */
+#flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:50;transition:opacity .07s;}
+
+/* ── DONE OVERLAY ── */
 #done-overlay{
-  position:absolute;top:0;left:0;right:0;bottom:0;
-  background:rgba(0,0,0,.88);z-index:60;
-  display:none;flex-direction:column;align-items:center;
-  justify-content:center;gap:1.2rem;padding:2rem;}
+  position:absolute;inset:0;background:rgba(7,7,15,.9);z-index:60;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  gap:1.25rem;padding:2rem;}
+#done-overlay.visible{display:flex;}
 #done-title{
-  font-family:'Space Grotesk',sans-serif;font-size:1.6rem;font-weight:700;
+  font-family:'Space Grotesk',sans-serif;font-size:1.5rem;font-weight:700;
   color:#34D399;text-align:center;}
-#done-sub{font-size:.82rem;color:rgba(255,255,255,.6);text-align:center;line-height:1.6;}
-#thumbs-wrap{display:flex;gap:1rem;}
-.thumb-box{border-radius:12px;overflow:hidden;width:120px;height:160px;
-  border:2px solid rgba(255,255,255,.15);}
+#done-sub{font-size:.8rem;color:rgba(255,255,255,.55);text-align:center;line-height:1.6;}
+#thumbs-wrap{display:flex;gap:1rem;margin-top:.25rem;}
+.thumb-col{display:flex;flex-direction:column;align-items:center;gap:.4rem;}
+.thumb-box{border-radius:10px;overflow:hidden;width:110px;height:150px;
+  border:1.5px solid rgba(255,255,255,.15);}
 .thumb-box img{width:100%;height:100%;object-fit:cover;}
-.thumb-label{font-size:.6rem;color:rgba(255,255,255,.4);
-  text-align:center;margin-top:.3rem;text-transform:uppercase;letter-spacing:.08em;}
+.thumb-lbl{font-size:.58rem;color:rgba(255,255,255,.35);
+  text-transform:uppercase;letter-spacing:.1em;}
+
+/* ── TRANSITION MSG ── */
+#turn-msg{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:rgba(0,0,0,.88);border-radius:18px;padding:1.5rem 2.5rem;
+  z-index:40;text-align:center;display:none;}
+#turn-msg.visible{display:block;}
+#turn-msg-icon{font-size:2.2rem;margin-bottom:.5rem;}
+#turn-msg-text{
+  font-family:'Space Grotesk',sans-serif;font-size:1rem;font-weight:700;
+  color:#fff;margin-bottom:.3rem;}
+#turn-msg-sub{font-size:.72rem;color:rgba(255,255,255,.5);}
 </style>
 </head>
 <body>
-<div id="wrap">
-  <video id="vid" autoplay playsinline muted></video>
-  <canvas id="ov"></canvas>
-
-  <!-- Flash -->
+<div id="cam-container">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
   <div id="flash"></div>
 
-  <!-- Top bar -->
+  <!-- Off screen -->
+  <div id="cam-off">
+    <div style="font-size:2.8rem">📷</div>
+    <div id="cam-off-title">Body Assessment Camera</div>
+    <div id="cam-off-sub">Stand 2–3 m away · Full body visible · Fitted clothing</div>
+    <button id="btn-start" onclick="startCapture()">Start Camera</button>
+    <div id="err-msg" style="font-size:.72rem;color:#EF4444;display:none;text-align:center;max-width:240px;"></div>
+  </div>
+
+  <!-- Top bar (hidden until camera on) -->
   <div id="status-bar">
     <div>
       <div id="phase-label">CAPTURING</div>
@@ -3163,185 +3205,203 @@ canvas#ov{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:n
     </div>
   </div>
 
-  <!-- Gesture box -->
+  <!-- Turn msg -->
+  <div id="turn-msg">
+    <div id="turn-msg-icon">↩️</div>
+    <div id="turn-msg-text">Turn sideways</div>
+    <div id="turn-msg-sub">Face left or right, then raise one hand</div>
+  </div>
+
+  <!-- Bottom gesture box -->
   <div id="gesture-box">
     <div id="ring-wrap">
-      <svg viewBox="0 0 88 88">
-        <circle cx="44" cy="44" r="38" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="6"/>
-        <circle id="ring-arc" cx="44" cy="44" r="38" fill="none"
+      <svg viewBox="0 0 84 84">
+        <circle cx="42" cy="42" r="36" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="6"/>
+        <circle id="ring-arc" cx="42" cy="42" r="36" fill="none"
           stroke="#3B82F6" stroke-width="6"
-          stroke-dasharray="239" stroke-dashoffset="239"
-          stroke-linecap="round"
-          transform="rotate(-90 44 44)"/>
+          stroke-dasharray="226" stroke-dashoffset="226"
+          stroke-linecap="round" transform="rotate(-90 42 42)"/>
       </svg>
       <div id="ring-num">✋</div>
     </div>
-    <div id="gesture-icon">✋</div>
-    <div id="gesture-text">Raise one hand above your head<br>and hold for 5 seconds</div>
-    <div id="gesture-sub" id="gesture-sub">Front photo · Shot 1 of 2</div>
+    <div id="gesture-text">Raise one hand above your head<br>and hold for <strong>5 seconds</strong></div>
+    <div id="gesture-hint">Front photo · Shot 1 of 2</div>
   </div>
 
   <!-- Done overlay -->
   <div id="done-overlay">
     <div id="done-title">✅ Both shots captured!</div>
-    <div id="done-sub">Sending to analysis pipeline…</div>
+    <div id="done-sub">Scroll down and click<br><strong>Analyse My Body</strong></div>
     <div id="thumbs-wrap">
-      <div>
-        <div class="thumb-box"><img id="thumb-front" src=""/></div>
-        <div class="thumb-label">Front</div>
+      <div class="thumb-col">
+        <div class="thumb-box"><img id="thumb-front" src="data:,"/></div>
+        <div class="thumb-lbl">Front</div>
       </div>
-      <div>
-        <div class="thumb-box"><img id="thumb-side" src=""/></div>
-        <div class="thumb-label">Side</div>
+      <div class="thumb-col">
+        <div class="thumb-box"><img id="thumb-side" src="data:,"/></div>
+        <div class="thumb-lbl">Side</div>
       </div>
     </div>
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.2.0/tf.min.js"></script>
+<!-- TF.js + MoveNet (same CDN as Live Trainer) -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.2.0/dist/tf-core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.2.0/dist/tf-converter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.2.0/dist/tf-backend-webgl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.0/dist/pose-detection.min.js"></script>
 <script>
-// ── State ────────────────────────────────────────────────────────
 const HOLD_SECS  = 5;
-const CIRCUMFERENCE = 2 * Math.PI * 38;  // ring circumference
+const CIRC       = 226;  // 2*pi*36
 
-let phase        = 'front';   // 'front' | 'side' | 'done'
-let holdStart    = null;
-let holdActive   = false;
-let imgFront     = null;
-let imgSide      = null;
-let poseNet      = null;
-let animId       = null;
+let phase      = 'front';
+let detector   = null;
+let stream     = null;
+let rafId      = null;
+let holdStart  = null;
+let holdActive = false;
+let imgFront   = null;
+let imgSide    = null;
+let lastPoses  = [];
 
-const vid        = document.getElementById('vid');
-const ovCanvas   = document.getElementById('ov');
-const ctx        = ovCanvas.getContext('2d');
-const ringArc    = document.getElementById('ring-arc');
-const ringNum    = document.getElementById('ring-num');
-const ringWrap   = document.getElementById('ring-wrap');
-const phaseName  = document.getElementById('phase-name');
-const gestText   = document.getElementById('gesture-text');
-const gestSub    = document.getElementById('gesture-sub');
-const dot0       = document.getElementById('dot0');
-const dot1       = document.getElementById('dot1');
-const flash      = document.getElementById('flash');
-const doneOv     = document.getElementById('done-overlay');
-const thumbFront = document.getElementById('thumb-front');
-const thumbSide  = document.getElementById('thumb-side');
+const video    = document.getElementById('video');
+const canvas   = document.getElementById('canvas');
+const ctx      = canvas.getContext('2d');
+const ringArc  = document.getElementById('ring-arc');
+const ringNum  = document.getElementById('ring-num');
+const ringWrap = document.getElementById('ring-wrap');
 
-// ── MediaPipe Pose via CDN ────────────────────────────────────────
-const POSE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/';
-let poseReady  = false;
-let mpPose     = null;
-let lastLms    = null;
+// ── Camera + model boot ─────────────────────────────────────────
+async function startCapture(){
+  const btn = document.getElementById('btn-start');
+  const err = document.getElementById('err-msg');
+  btn.textContent = 'Loading…'; btn.disabled = true;
+  err.style.display = 'none';
 
-function initPose(){
-  mpPose = new Pose({locateFile: f => POSE_CDN + f});
-  mpPose.setOptions({
-    modelComplexity: 1,
-    smoothLandmarks: true,
-    enableSegmentation: false,
-    minDetectionConfidence: 0.45,
-    minTrackingConfidence: 0.45
-  });
-  mpPose.onResults(onPoseResults);
-  mpPose.initialize().then(()=>{
-    poseReady = true;
-    console.log('Pose ready');
-  });
-}
-
-function onPoseResults(results){
-  lastLms = results.poseLandmarks || null;
-}
-
-// ── Camera ───────────────────────────────────────────────────────
-async function startCamera(){
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:'user', width:{ideal:640}, height:{ideal:960} },
-      audio:false
-    });
-    vid.srcObject = stream;
-    await new Promise(r => vid.onloadedmetadata = r);
-    vid.play();
+    // Camera first — same pattern as Live Trainer
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'user' } }
+    }).catch(() =>
+      navigator.mediaDevices.getUserMedia({ audio: false, video: true })
+    );
+
+    video.srcObject = stream;
+    await new Promise(r => { video.onloadedmetadata = r; });
+    await video.play();
+    applyOrientation();
     resizeCanvas();
-    initPose();
+
+    // Hide off-screen, show UI
+    document.getElementById('cam-off').style.display   = 'none';
+    document.getElementById('status-bar').classList.add('visible');
+    document.getElementById('gesture-box').classList.add('visible');
+
+    // Load MoveNet
+    detector = await poseDetection.createDetector(
+      poseDetection.SupportedModels.MoveNet,
+      { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+        enableSmoothing: true }
+    );
+
     loop();
-  } catch(e){
-    document.getElementById('gesture-text').textContent =
-      'Camera access denied. Please allow camera and refresh.';
+  } catch(e) {
+    btn.textContent = 'Start Camera'; btn.disabled = false;
+    err.textContent = 'Camera error: ' + (e.message || e);
+    err.style.display = 'block';
+  }
+}
+
+function applyOrientation(){
+  const vW = video.videoWidth, vH = video.videoHeight;
+  const needsRotate = vW > vH;
+  const container = document.getElementById('cam-container');
+  const cW = container.offsetWidth, cH = container.offsetHeight;
+  if(needsRotate){
+    video.style.position = 'absolute';
+    video.style.width    = cH + 'px';
+    video.style.height   = cW + 'px';
+    video.style.top      = '50%'; video.style.left = '50%';
+    video.style.objectFit = 'cover';
+    video.className = 'portrait-fix mirror';
+  } else {
+    video.style.position = 'absolute';
+    video.style.width = '100%'; video.style.height = '100%';
+    video.style.top = '0'; video.style.left = '0';
+    video.style.objectFit = 'cover';
+    video.className = 'normal mirror';
   }
 }
 
 function resizeCanvas(){
-  ovCanvas.width  = vid.videoWidth  || window.innerWidth;
-  ovCanvas.height = vid.videoHeight || window.innerHeight;
+  const c = document.getElementById('cam-container');
+  canvas.width  = c.offsetWidth;
+  canvas.height = c.offsetHeight;
 }
 
-// ── Skeleton drawing ─────────────────────────────────────────────
-const CONNECTIONS = [
-  [11,12],[11,13],[13,15],[12,14],[14,16],
-  [11,23],[12,24],[23,24],
-  [23,25],[25,27],[27,29],[27,31],
-  [24,26],[26,28],[28,30],[28,32]
+// ── Skeleton ────────────────────────────────────────────────────
+const BONES = [
+  [5,6],[5,7],[7,9],[6,8],[8,10],
+  [5,11],[6,12],[11,12],
+  [11,13],[13,15],[12,14],[14,16]
 ];
-const LEG_IDS = new Set([23,24,25,26,27,28,29,30,31,32]);
+const LEG_BONES = [[11,13],[13,15],[12,14],[14,16],[11,12]];
+const LEG_SET   = new Set([11,12,13,14,15,16]);
 
-function drawSkeleton(lms, W, H){
-  if(!lms) return;
+function drawSkeleton(poses){
+  if(!poses || !poses.length) return;
+  const kps = poses[0].keypoints;
+  const W = canvas.width, H = canvas.height;
   ctx.save();
-  // mirror to match video flip
+  // Mirror canvas to match mirrored video
   ctx.scale(-1,1); ctx.translate(-W,0);
 
-  for(const [a,b] of CONNECTIONS){
-    const la=lms[a], lb=lms[b];
-    if(!la||!lb||la.visibility<0.3||lb.visibility<0.3) continue;
-    const isLeg = LEG_IDS.has(a) || LEG_IDS.has(b);
+  for(const [a,b] of BONES){
+    const ka=kps[a], kb=kps[b];
+    if(!ka||!kb||ka.score<0.25||kb.score<0.25) continue;
+    const isLeg = LEG_SET.has(a)||LEG_SET.has(b);
     ctx.beginPath();
-    ctx.moveTo(la.x*W, la.y*H);
-    ctx.lineTo(lb.x*W, lb.y*H);
-    ctx.strokeStyle = isLeg ? 'rgba(59,130,246,.9)' : 'rgba(200,210,220,.7)';
-    ctx.lineWidth   = isLeg ? 3 : 2;
-    ctx.shadowColor = isLeg ? '#3B82F6' : 'transparent';
-    ctx.shadowBlur  = isLeg ? 8 : 0;
+    ctx.moveTo(ka.x/video.videoWidth*W, ka.y/video.videoHeight*H);
+    ctx.lineTo(kb.x/video.videoWidth*W, kb.y/video.videoHeight*H);
+    ctx.strokeStyle = isLeg?'rgba(59,130,246,.95)':'rgba(220,230,240,.75)';
+    ctx.lineWidth   = isLeg?3.5:2;
+    ctx.shadowColor = '#3B82F6'; ctx.shadowBlur = isLeg?10:0;
     ctx.stroke();
   }
-
-  // Joints
-  for(let i=11;i<=32;i++){
-    const lm=lms[i];
-    if(!lm||lm.visibility<0.3) continue;
+  for(let i=5;i<=16;i++){
+    const k=kps[i]; if(!k||k.score<0.25) continue;
     ctx.beginPath();
-    ctx.arc(lm.x*W, lm.y*H, LEG_IDS.has(i)?5:3, 0, Math.PI*2);
-    ctx.fillStyle   = LEG_IDS.has(i) ? '#60A5FA' : '#fff';
-    ctx.shadowColor = '#3B82F6';
-    ctx.shadowBlur  = 6;
+    ctx.arc(k.x/video.videoWidth*W, k.y/video.videoHeight*H, LEG_SET.has(i)?5:3.5, 0, Math.PI*2);
+    ctx.fillStyle = LEG_SET.has(i)?'#60A5FA':'rgba(255,255,255,.9)';
+    ctx.shadowBlur=6; ctx.shadowColor='#3B82F6';
     ctx.fill();
   }
   ctx.restore();
 }
 
-// ── Gesture detection ─────────────────────────────────────────────
-function detectRaisedHand(lms){
-  if(!lms) return false;
-  const nose  = lms[0];
-  const lw    = lms[15];
-  const rw    = lms[16];
-  const lv    = lw && lw.visibility > 0.3;
-  const rv    = rw && rw.visibility > 0.3;
-  if(!nose) return false;
-  // One (or both) wrist clearly above nose
-  const lRaised = lv && lw.y < nose.y - 0.05;
-  const rRaised = rv && rw.y < nose.y - 0.05;
-  return lRaised || rRaised;
+// ── Gesture detection — one wrist above nose ─────────────────────
+function detectRaisedHand(poses){
+  if(!poses||!poses.length) return false;
+  const kps  = poses[0].keypoints;
+  const nose = kps[0];
+  const lw   = kps[9];   // left wrist
+  const rw   = kps[10];  // right wrist
+  if(!nose||nose.score<0.3) return false;
+
+  // Convert to normalised coords (0–1) for threshold
+  const noseY  = nose.y / video.videoHeight;
+  const lwY    = lw  && lw.score>0.25  ? lw.y/video.videoHeight  : 1;
+  const rwY    = rw  && rw.score>0.25  ? rw.y/video.videoHeight  : 1;
+
+  return (lwY < noseY - 0.05) || (rwY < noseY - 0.05);
 }
 
-// ── Ring update ──────────────────────────────────────────────────
-function updateRing(pct){
-  const offset = CIRCUMFERENCE * (1 - pct);
-  ringArc.style.strokeDashoffset = offset;
+// ── Ring ────────────────────────────────────────────────────────
+function setRing(pct){
+  ringArc.style.strokeDashoffset = CIRC * (1 - pct);
   if(pct <= 0){
-    ringArc.style.stroke = 'rgba(255,255,255,.15)';
+    ringArc.style.stroke = 'rgba(255,255,255,.12)';
     ringWrap.className = '';
     ringNum.textContent = '✋';
   } else if(pct >= 1){
@@ -3350,130 +3410,93 @@ function updateRing(pct){
     ringNum.textContent = '✓';
   } else {
     ringArc.style.stroke = '#3B82F6';
-    ringWrap.className = 'active';
-    const secs = Math.ceil(HOLD_SECS * (1-pct));
-    ringNum.textContent = secs;
+    ringWrap.className = 'counting';
+    ringNum.textContent = Math.ceil(HOLD_SECS*(1-pct));
   }
 }
 
-// ── Capture ──────────────────────────────────────────────────────
+// ── Capture frame ───────────────────────────────────────────────
 function captureFrame(){
-  // Flash
-  flash.style.opacity = '1';
-  setTimeout(()=>{ flash.style.opacity='0'; }, 120);
+  const fl = document.getElementById('flash');
+  fl.style.opacity='1'; setTimeout(()=>{fl.style.opacity='0';},110);
 
-  // Draw current video frame to offscreen canvas
   const cap = document.createElement('canvas');
-  cap.width  = vid.videoWidth;
-  cap.height = vid.videoHeight;
+  cap.width  = video.videoWidth;
+  cap.height = video.videoHeight;
   const c2   = cap.getContext('2d');
+  // Mirror to match display
   c2.save(); c2.scale(-1,1); c2.translate(-cap.width,0);
-  c2.drawImage(vid,0,0);
+  c2.drawImage(video,0,0);
   c2.restore();
   return cap.toDataURL('image/jpeg', 0.92);
 }
 
-// ── Phase transitions ─────────────────────────────────────────────
-function transitionToSide(){
-  phase     = 'side';
-  holdStart = null;
-  holdActive= false;
-  updateRing(0);
+// ── Phase: front → side → done ─────────────────────────────────
+function goSide(){
+  phase = 'side';
+  holdStart = null; holdActive = false; setRing(0);
 
-  phaseName.textContent  = 'Side View';
-  gestText.textContent   = 'Turn 90° sideways.\nRaise one hand above your head and hold for 5 seconds.';
-  gestSub.textContent    = 'Side photo · Shot 2 of 2';
-  dot0.className = 'dot done';
-  dot1.className = 'dot active';
+  document.getElementById('phase-name').textContent  = 'Side View';
+  document.getElementById('gesture-hint').textContent = 'Side photo · Shot 2 of 2';
+  document.getElementById('dot0').className = 'dot done';
+  document.getElementById('dot1').className = 'dot active';
 
-  // Show side instruction overlay for 2s
-  const msg = document.createElement('div');
-  msg.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-    background:rgba(0,0,0,.85);border-radius:16px;padding:1.5rem 2rem;z-index:30;
-    text-align:center;color:#fff;font-family:'Space Grotesk',sans-serif;`;
-  msg.innerHTML = `<div style="font-size:2rem;margin-bottom:.5rem">↩️ Turn sideways</div>
-    <div style="font-size:.85rem;color:rgba(255,255,255,.6)">Face left or right<br>then raise one hand</div>`;
-  document.getElementById('wrap').appendChild(msg);
-  setTimeout(()=>msg.remove(), 2200);
+  // Turn message
+  const msg = document.getElementById('turn-msg');
+  msg.classList.add('visible');
+  setTimeout(()=>msg.classList.remove('visible'), 2400);
 }
 
-function finishCapture(){
+function goDone(){
   phase = 'done';
-  cancelAnimationFrame(animId);
+  cancelAnimationFrame(rafId);
 
-  // Show thumbnails
-  thumbFront.src = imgFront;
-  thumbSide.src  = imgSide;
-  doneOv.style.display = 'flex';
+  document.getElementById('dot1').className = 'dot done';
+  document.getElementById('gesture-box').classList.remove('visible');
+  document.getElementById('status-bar').classList.remove('visible');
 
-  dot0.className = 'dot done';
-  dot1.className = 'dot done';
+  document.getElementById('thumb-front').src = imgFront;
+  document.getElementById('thumb-side').src  = imgSide;
+  document.getElementById('done-overlay').classList.add('visible');
 
-  // Send both images to Streamlit via postMessage
+  // Send to Streamlit parent
   setTimeout(()=>{
-    window.parent.postMessage({
-      type: 'ba_photos',
-      front: imgFront,
-      side:  imgSide
-    }, '*');
-  }, 600);
+    window.parent.postMessage({ type:'ba_photos', front:imgFront, side:imgSide }, '*');
+  }, 500);
 }
 
-// ── Main loop ────────────────────────────────────────────────────
+// ── Main loop ───────────────────────────────────────────────────
 async function loop(){
-  if(phase === 'done'){ return; }
+  if(phase==='done') return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  const W = ovCanvas.width, H = ovCanvas.height;
-  ctx.clearRect(0, 0, W, H);
-
-  // Feed frame to pose
-  if(poseReady && vid.readyState >= 2){
-    try { await mpPose.send({image: vid}); } catch(e){}
+  if(detector && video.readyState>=2){
+    try{
+      lastPoses = await detector.estimatePoses(video,{flipHorizontal:false});
+    }catch(e){}
   }
 
-  drawSkeleton(lastLms, W, H);
+  drawSkeleton(lastPoses);
 
-  const raised = detectRaisedHand(lastLms);
+  const raised = detectRaisedHand(lastPoses);
 
   if(raised){
-    if(!holdActive){
-      holdActive = true;
-      holdStart  = performance.now();
-    }
-    const elapsed = (performance.now() - holdStart) / 1000;
-    const pct     = Math.min(elapsed / HOLD_SECS, 1);
-    updateRing(pct);
-
-    if(pct >= 1){
-      // Capture!
+    if(!holdActive){ holdActive=true; holdStart=performance.now(); }
+    const pct = Math.min((performance.now()-holdStart)/1000/HOLD_SECS, 1);
+    setRing(pct);
+    if(pct>=1){
       const dataUrl = captureFrame();
-      if(phase === 'front'){
-        imgFront = dataUrl;
-        transitionToSide();
-      } else if(phase === 'side'){
-        imgSide  = dataUrl;
-        finishCapture();
-        return;
-      }
+      if(phase==='front'){ imgFront=dataUrl; goSide(); }
+      else               { imgSide =dataUrl; goDone(); return; }
     }
   } else {
-    holdActive = false;
-    holdStart  = null;
-    updateRing(0);
+    holdActive=false; holdStart=null; setRing(0);
   }
 
-  animId = requestAnimationFrame(loop);
+  rafId = requestAnimationFrame(loop);
 }
 
-// ── Boot ─────────────────────────────────────────────────────────
-window.addEventListener('load', startCamera);
-window.addEventListener('resize', resizeCanvas);
-
-// Load MediaPipe
-const mpScript = document.createElement('script');
-mpScript.src = POSE_CDN + 'pose.js';
-mpScript.crossOrigin = 'anonymous';
-document.head.appendChild(mpScript);
+window.addEventListener('resize', ()=>{ applyOrientation(); resizeCanvas(); });
 </script>
 </body></html>"""
 
