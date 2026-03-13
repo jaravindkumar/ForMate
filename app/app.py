@@ -3029,31 +3029,541 @@ No bullet points — write in flowing paragraphs. Keep it under 300 words."""
         ba_weight = st.number_input("Weight (kg)", min_value=40.0, max_value=200.0, value=75.0,
                                     step=0.5, key="ba_weight", label_visibility="visible")
 
-    # ── Step 2: Photos ────────────────────────────────────────────
-    st.markdown('<p class="ba-section">Step 2 — Upload Photos</p>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style="font-size:.75rem;color:var(--sub);background:var(--card2);border:1px solid var(--edge);
-    border-radius:10px;padding:.65rem .85rem;margin-bottom:1rem;line-height:1.65;">
-    📸 <strong>Tips for best results:</strong>
-    Stand 2–3m from camera &nbsp;·&nbsp; Full body visible head to toe &nbsp;·&nbsp;
-    Wear fitted clothing &nbsp;·&nbsp; Stand on a flat surface &nbsp;·&nbsp;
-    Arms slightly away from body
-    </div>""", unsafe_allow_html=True)
+    # ── Step 2: Capture mode ──────────────────────────────────────
+    st.markdown('<p class="ba-section">Step 2 — Capture Photos</p>', unsafe_allow_html=True)
 
-    col_f, col_s = st.columns(2)
-    with col_f:
-        st.markdown('<p class="ba-photo-label">📷 Front View</p>', unsafe_allow_html=True)
-        ba_front = st.file_uploader("Front photo", type=["jpg","jpeg","png","webp"],
-                                    key="ba_front", label_visibility="collapsed")
-        if ba_front:
-            st.image(ba_front, use_column_width=True)
-    with col_s:
-        st.markdown('<p class="ba-photo-label">📷 Side View (optional but recommended)</p>',
+    ba_mode = st.radio("Capture method", ["📷  Live Camera", "📁  Upload Photos"],
+                       horizontal=True, key="ba_mode", label_visibility="collapsed")
+
+    # initialise session state for captured images
+    if "ba_img_front" not in st.session_state: st.session_state.ba_img_front = None
+    if "ba_img_side"  not in st.session_state: st.session_state.ba_img_side  = None
+    if "ba_cam_done"  not in st.session_state: st.session_state.ba_cam_done  = False
+
+    ba_front = None
+    ba_side  = None
+
+    # ── LIVE CAMERA MODE ─────────────────────────────────────────
+    if "Live Camera" in ba_mode:
+        import streamlit.components.v1 as components
+
+        # Reset button
+        col_rst, _ = st.columns([1,4])
+        with col_rst:
+            if st.button("🔄 Reset Camera", key="ba_reset"):
+                st.session_state.ba_img_front = None
+                st.session_state.ba_img_side  = None
+                st.session_state.ba_cam_done  = False
+                st.rerun()
+
+        if not st.session_state.ba_cam_done:
+            st.markdown("""
+            <div style="font-size:.75rem;color:var(--sub);background:var(--card2);
+            border:1px solid var(--edge);border-radius:10px;padding:.65rem .85rem;
+            margin-bottom:.75rem;line-height:1.65;">
+            ✋ <strong>How to capture:</strong>
+            Raise <strong>one hand above your head</strong> and hold for 5 seconds.
+            First shot = front view &nbsp;·&nbsp; Second shot = side view (turn 90°).
+            Stand 2–3 m away, full body visible, fitted clothing.
+            </div>""", unsafe_allow_html=True)
+
+        gesture_html = """<!DOCTYPE html><html>
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:'Inter',sans-serif;}
+#wrap{position:relative;width:100%;height:100vh;}
+video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+canvas#ov{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
+
+/* ── TOP STATUS BAR ── */
+#status-bar{
+  position:absolute;top:0;left:0;right:0;
+  background:linear-gradient(to bottom,rgba(0,0,0,.82),transparent);
+  padding:1.1rem 1.2rem .9rem;z-index:20;
+  display:flex;align-items:center;justify-content:space-between;}
+#phase-label{
+  font-family:'Space Grotesk',sans-serif;font-size:.7rem;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.45);}
+#phase-name{
+  font-family:'Space Grotesk',sans-serif;font-size:1.3rem;font-weight:700;
+  color:#fff;line-height:1;margin-top:.15rem;}
+#shot-dots{display:flex;gap:.5rem;}
+.dot{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.18);
+     transition:background .3s;}
+.dot.done{background:#34D399;}
+.dot.active{background:#3B82F6;box-shadow:0 0 8px #3B82F6;}
+
+/* ── GESTURE INSTRUCTION ── */
+#gesture-box{
+  position:absolute;bottom:0;left:0;right:0;
+  background:linear-gradient(to top,rgba(0,0,0,.88),transparent);
+  padding:1.5rem 1.2rem 1.8rem;z-index:20;
+  display:flex;flex-direction:column;align-items:center;gap:.6rem;}
+#gesture-icon{font-size:2.4rem;line-height:1;}
+#gesture-text{
+  font-size:.82rem;font-weight:600;color:rgba(255,255,255,.85);
+  text-align:center;line-height:1.5;max-width:260px;}
+#gesture-sub{
+  font-size:.68rem;color:rgba(255,255,255,.4);text-align:center;}
+
+/* ── COUNTDOWN RING ── */
+#ring-wrap{position:relative;width:88px;height:88px;}
+#ring-wrap svg{position:absolute;top:0;left:0;width:100%;height:100%;}
+#ring-num{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-family:'Space Grotesk',sans-serif;font-size:2rem;font-weight:700;
+  color:#fff;line-height:1;}
+#ring-wrap.active #ring-num{color:#3B82F6;}
+#ring-wrap.done   #ring-num{color:#34D399;}
+
+/* ── FLASH overlay ── */
+#flash{
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  background:#fff;opacity:0;pointer-events:none;z-index:50;
+  transition:opacity .08s;}
+
+/* ── DONE STATE ── */
+#done-overlay{
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  background:rgba(0,0,0,.88);z-index:60;
+  display:none;flex-direction:column;align-items:center;
+  justify-content:center;gap:1.2rem;padding:2rem;}
+#done-title{
+  font-family:'Space Grotesk',sans-serif;font-size:1.6rem;font-weight:700;
+  color:#34D399;text-align:center;}
+#done-sub{font-size:.82rem;color:rgba(255,255,255,.6);text-align:center;line-height:1.6;}
+#thumbs-wrap{display:flex;gap:1rem;}
+.thumb-box{border-radius:12px;overflow:hidden;width:120px;height:160px;
+  border:2px solid rgba(255,255,255,.15);}
+.thumb-box img{width:100%;height:100%;object-fit:cover;}
+.thumb-label{font-size:.6rem;color:rgba(255,255,255,.4);
+  text-align:center;margin-top:.3rem;text-transform:uppercase;letter-spacing:.08em;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <video id="vid" autoplay playsinline muted></video>
+  <canvas id="ov"></canvas>
+
+  <!-- Flash -->
+  <div id="flash"></div>
+
+  <!-- Top bar -->
+  <div id="status-bar">
+    <div>
+      <div id="phase-label">CAPTURING</div>
+      <div id="phase-name">Front View</div>
+    </div>
+    <div id="shot-dots">
+      <div class="dot active" id="dot0"></div>
+      <div class="dot"        id="dot1"></div>
+    </div>
+  </div>
+
+  <!-- Gesture box -->
+  <div id="gesture-box">
+    <div id="ring-wrap">
+      <svg viewBox="0 0 88 88">
+        <circle cx="44" cy="44" r="38" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="6"/>
+        <circle id="ring-arc" cx="44" cy="44" r="38" fill="none"
+          stroke="#3B82F6" stroke-width="6"
+          stroke-dasharray="239" stroke-dashoffset="239"
+          stroke-linecap="round"
+          transform="rotate(-90 44 44)"/>
+      </svg>
+      <div id="ring-num">✋</div>
+    </div>
+    <div id="gesture-icon">✋</div>
+    <div id="gesture-text">Raise one hand above your head<br>and hold for 5 seconds</div>
+    <div id="gesture-sub" id="gesture-sub">Front photo · Shot 1 of 2</div>
+  </div>
+
+  <!-- Done overlay -->
+  <div id="done-overlay">
+    <div id="done-title">✅ Both shots captured!</div>
+    <div id="done-sub">Sending to analysis pipeline…</div>
+    <div id="thumbs-wrap">
+      <div>
+        <div class="thumb-box"><img id="thumb-front" src=""/></div>
+        <div class="thumb-label">Front</div>
+      </div>
+      <div>
+        <div class="thumb-box"><img id="thumb-side" src=""/></div>
+        <div class="thumb-label">Side</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.2.0/tf.min.js"></script>
+<script>
+// ── State ────────────────────────────────────────────────────────
+const HOLD_SECS  = 5;
+const CIRCUMFERENCE = 2 * Math.PI * 38;  // ring circumference
+
+let phase        = 'front';   // 'front' | 'side' | 'done'
+let holdStart    = null;
+let holdActive   = false;
+let imgFront     = null;
+let imgSide      = null;
+let poseNet      = null;
+let animId       = null;
+
+const vid        = document.getElementById('vid');
+const ovCanvas   = document.getElementById('ov');
+const ctx        = ovCanvas.getContext('2d');
+const ringArc    = document.getElementById('ring-arc');
+const ringNum    = document.getElementById('ring-num');
+const ringWrap   = document.getElementById('ring-wrap');
+const phaseName  = document.getElementById('phase-name');
+const gestText   = document.getElementById('gesture-text');
+const gestSub    = document.getElementById('gesture-sub');
+const dot0       = document.getElementById('dot0');
+const dot1       = document.getElementById('dot1');
+const flash      = document.getElementById('flash');
+const doneOv     = document.getElementById('done-overlay');
+const thumbFront = document.getElementById('thumb-front');
+const thumbSide  = document.getElementById('thumb-side');
+
+// ── MediaPipe Pose via CDN ────────────────────────────────────────
+const POSE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/';
+let poseReady  = false;
+let mpPose     = null;
+let lastLms    = null;
+
+function initPose(){
+  mpPose = new Pose({locateFile: f => POSE_CDN + f});
+  mpPose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    minDetectionConfidence: 0.45,
+    minTrackingConfidence: 0.45
+  });
+  mpPose.onResults(onPoseResults);
+  mpPose.initialize().then(()=>{
+    poseReady = true;
+    console.log('Pose ready');
+  });
+}
+
+function onPoseResults(results){
+  lastLms = results.poseLandmarks || null;
+}
+
+// ── Camera ───────────────────────────────────────────────────────
+async function startCamera(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:'user', width:{ideal:640}, height:{ideal:960} },
+      audio:false
+    });
+    vid.srcObject = stream;
+    await new Promise(r => vid.onloadedmetadata = r);
+    vid.play();
+    resizeCanvas();
+    initPose();
+    loop();
+  } catch(e){
+    document.getElementById('gesture-text').textContent =
+      'Camera access denied. Please allow camera and refresh.';
+  }
+}
+
+function resizeCanvas(){
+  ovCanvas.width  = vid.videoWidth  || window.innerWidth;
+  ovCanvas.height = vid.videoHeight || window.innerHeight;
+}
+
+// ── Skeleton drawing ─────────────────────────────────────────────
+const CONNECTIONS = [
+  [11,12],[11,13],[13,15],[12,14],[14,16],
+  [11,23],[12,24],[23,24],
+  [23,25],[25,27],[27,29],[27,31],
+  [24,26],[26,28],[28,30],[28,32]
+];
+const LEG_IDS = new Set([23,24,25,26,27,28,29,30,31,32]);
+
+function drawSkeleton(lms, W, H){
+  if(!lms) return;
+  ctx.save();
+  // mirror to match video flip
+  ctx.scale(-1,1); ctx.translate(-W,0);
+
+  for(const [a,b] of CONNECTIONS){
+    const la=lms[a], lb=lms[b];
+    if(!la||!lb||la.visibility<0.3||lb.visibility<0.3) continue;
+    const isLeg = LEG_IDS.has(a) || LEG_IDS.has(b);
+    ctx.beginPath();
+    ctx.moveTo(la.x*W, la.y*H);
+    ctx.lineTo(lb.x*W, lb.y*H);
+    ctx.strokeStyle = isLeg ? 'rgba(59,130,246,.9)' : 'rgba(200,210,220,.7)';
+    ctx.lineWidth   = isLeg ? 3 : 2;
+    ctx.shadowColor = isLeg ? '#3B82F6' : 'transparent';
+    ctx.shadowBlur  = isLeg ? 8 : 0;
+    ctx.stroke();
+  }
+
+  // Joints
+  for(let i=11;i<=32;i++){
+    const lm=lms[i];
+    if(!lm||lm.visibility<0.3) continue;
+    ctx.beginPath();
+    ctx.arc(lm.x*W, lm.y*H, LEG_IDS.has(i)?5:3, 0, Math.PI*2);
+    ctx.fillStyle   = LEG_IDS.has(i) ? '#60A5FA' : '#fff';
+    ctx.shadowColor = '#3B82F6';
+    ctx.shadowBlur  = 6;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ── Gesture detection ─────────────────────────────────────────────
+function detectRaisedHand(lms){
+  if(!lms) return false;
+  const nose  = lms[0];
+  const lw    = lms[15];
+  const rw    = lms[16];
+  const lv    = lw && lw.visibility > 0.3;
+  const rv    = rw && rw.visibility > 0.3;
+  if(!nose) return false;
+  // One (or both) wrist clearly above nose
+  const lRaised = lv && lw.y < nose.y - 0.05;
+  const rRaised = rv && rw.y < nose.y - 0.05;
+  return lRaised || rRaised;
+}
+
+// ── Ring update ──────────────────────────────────────────────────
+function updateRing(pct){
+  const offset = CIRCUMFERENCE * (1 - pct);
+  ringArc.style.strokeDashoffset = offset;
+  if(pct <= 0){
+    ringArc.style.stroke = 'rgba(255,255,255,.15)';
+    ringWrap.className = '';
+    ringNum.textContent = '✋';
+  } else if(pct >= 1){
+    ringArc.style.stroke = '#34D399';
+    ringWrap.className = 'done';
+    ringNum.textContent = '✓';
+  } else {
+    ringArc.style.stroke = '#3B82F6';
+    ringWrap.className = 'active';
+    const secs = Math.ceil(HOLD_SECS * (1-pct));
+    ringNum.textContent = secs;
+  }
+}
+
+// ── Capture ──────────────────────────────────────────────────────
+function captureFrame(){
+  // Flash
+  flash.style.opacity = '1';
+  setTimeout(()=>{ flash.style.opacity='0'; }, 120);
+
+  // Draw current video frame to offscreen canvas
+  const cap = document.createElement('canvas');
+  cap.width  = vid.videoWidth;
+  cap.height = vid.videoHeight;
+  const c2   = cap.getContext('2d');
+  c2.save(); c2.scale(-1,1); c2.translate(-cap.width,0);
+  c2.drawImage(vid,0,0);
+  c2.restore();
+  return cap.toDataURL('image/jpeg', 0.92);
+}
+
+// ── Phase transitions ─────────────────────────────────────────────
+function transitionToSide(){
+  phase     = 'side';
+  holdStart = null;
+  holdActive= false;
+  updateRing(0);
+
+  phaseName.textContent  = 'Side View';
+  gestText.textContent   = 'Turn 90° sideways.\nRaise one hand above your head and hold for 5 seconds.';
+  gestSub.textContent    = 'Side photo · Shot 2 of 2';
+  dot0.className = 'dot done';
+  dot1.className = 'dot active';
+
+  // Show side instruction overlay for 2s
+  const msg = document.createElement('div');
+  msg.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:rgba(0,0,0,.85);border-radius:16px;padding:1.5rem 2rem;z-index:30;
+    text-align:center;color:#fff;font-family:'Space Grotesk',sans-serif;`;
+  msg.innerHTML = `<div style="font-size:2rem;margin-bottom:.5rem">↩️ Turn sideways</div>
+    <div style="font-size:.85rem;color:rgba(255,255,255,.6)">Face left or right<br>then raise one hand</div>`;
+  document.getElementById('wrap').appendChild(msg);
+  setTimeout(()=>msg.remove(), 2200);
+}
+
+function finishCapture(){
+  phase = 'done';
+  cancelAnimationFrame(animId);
+
+  // Show thumbnails
+  thumbFront.src = imgFront;
+  thumbSide.src  = imgSide;
+  doneOv.style.display = 'flex';
+
+  dot0.className = 'dot done';
+  dot1.className = 'dot done';
+
+  // Send both images to Streamlit via postMessage
+  setTimeout(()=>{
+    window.parent.postMessage({
+      type: 'ba_photos',
+      front: imgFront,
+      side:  imgSide
+    }, '*');
+  }, 600);
+}
+
+// ── Main loop ────────────────────────────────────────────────────
+async function loop(){
+  if(phase === 'done'){ return; }
+
+  const W = ovCanvas.width, H = ovCanvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Feed frame to pose
+  if(poseReady && vid.readyState >= 2){
+    try { await mpPose.send({image: vid}); } catch(e){}
+  }
+
+  drawSkeleton(lastLms, W, H);
+
+  const raised = detectRaisedHand(lastLms);
+
+  if(raised){
+    if(!holdActive){
+      holdActive = true;
+      holdStart  = performance.now();
+    }
+    const elapsed = (performance.now() - holdStart) / 1000;
+    const pct     = Math.min(elapsed / HOLD_SECS, 1);
+    updateRing(pct);
+
+    if(pct >= 1){
+      // Capture!
+      const dataUrl = captureFrame();
+      if(phase === 'front'){
+        imgFront = dataUrl;
+        transitionToSide();
+      } else if(phase === 'side'){
+        imgSide  = dataUrl;
+        finishCapture();
+        return;
+      }
+    }
+  } else {
+    holdActive = false;
+    holdStart  = null;
+    updateRing(0);
+  }
+
+  animId = requestAnimationFrame(loop);
+}
+
+// ── Boot ─────────────────────────────────────────────────────────
+window.addEventListener('load', startCamera);
+window.addEventListener('resize', resizeCanvas);
+
+// Load MediaPipe
+const mpScript = document.createElement('script');
+mpScript.src = POSE_CDN + 'pose.js';
+mpScript.crossOrigin = 'anonymous';
+document.head.appendChild(mpScript);
+</script>
+</body></html>"""
+
+        # Embed camera iframe
+        cam_component = components.html(gesture_html, height=640, scrolling=False)
+
+        # Receive postMessage via hidden bridge
+        # We use a second tiny component to relay postMessage → session_state
+        bridge_html = """<script>
+window.addEventListener('message', function(e){
+  if(e.data && e.data.type === 'ba_photos'){
+    // Relay to Streamlit via query param trick — write to sessionStorage
+    sessionStorage.setItem('ba_front', e.data.front);
+    sessionStorage.setItem('ba_side',  e.data.side);
+    // Signal Streamlit to rerun via URL fragment change
+    window.parent.location.hash = 'ba_captured_' + Date.now();
+  }
+});
+// On load, check if photos already in sessionStorage and relay up
+const f = sessionStorage.getItem('ba_front');
+const s = sessionStorage.getItem('ba_side');
+if(f && s){
+  window.parent.postMessage({type:'ba_ready',front:f,side:s},'*');
+}
+</script>"""
+
+        # Show captured previews if we have them
+        if st.session_state.ba_img_front:
+            st.success("✅ Both photos captured — scroll down to analyse.")
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                st.markdown('<p class="ba-photo-label">Front</p>', unsafe_allow_html=True)
+                # Decode base64 and show
+                import base64
+                front_b64 = st.session_state.ba_img_front.split(',')[1] if ',' in st.session_state.ba_img_front else st.session_state.ba_img_front
+                front_bytes = base64.b64decode(front_b64)
+                st.image(front_bytes, use_column_width=True)
+            with col_p2:
+                st.markdown('<p class="ba-photo-label">Side</p>', unsafe_allow_html=True)
+                if st.session_state.ba_img_side:
+                    side_b64 = st.session_state.ba_img_side.split(',')[1] if ',' in st.session_state.ba_img_side else st.session_state.ba_img_side
+                    side_bytes = base64.b64decode(side_b64)
+                    st.image(side_bytes, use_column_width=True)
+
+        # JS→Python bridge: file uploader that JS programmatically triggers
+        st.markdown('<p style="font-size:.7rem;color:var(--sub);margin-top:.5rem">'
+                    'After both shots are captured above, click <strong>Send to Analysis</strong> '
+                    'in the camera view, or use the uploader below as fallback:</p>',
                     unsafe_allow_html=True)
-        ba_side = st.file_uploader("Side photo", type=["jpg","jpeg","png","webp"],
-                                   key="ba_side", label_visibility="collapsed")
-        if ba_side:
-            st.image(ba_side, use_column_width=True)
+        ba_cam_upload = st.file_uploader(
+            "Captured photos (auto-filled by camera)",
+            type=["jpg","jpeg","png"],
+            accept_multiple_files=True,
+            key="ba_cam_upload",
+            label_visibility="collapsed"
+        )
+        if ba_cam_upload and len(ba_cam_upload) >= 1:
+            st.session_state.ba_img_front = ba_cam_upload[0]
+            if len(ba_cam_upload) >= 2:
+                st.session_state.ba_img_side = ba_cam_upload[1]
+
+        # Set ba_front / ba_side from session state for analysis
+        ba_front = st.session_state.ba_img_front
+        ba_side  = st.session_state.ba_img_side
+
+    # ── UPLOAD MODE ──────────────────────────────────────────────
+    else:
+        st.markdown("""
+        <div style="font-size:.75rem;color:var(--sub);background:var(--card2);border:1px solid var(--edge);
+        border-radius:10px;padding:.65rem .85rem;margin-bottom:1rem;line-height:1.65;">
+        📸 <strong>Tips for best results:</strong>
+        Stand 2–3m from camera &nbsp;·&nbsp; Full body visible head to toe &nbsp;·&nbsp;
+        Wear fitted clothing &nbsp;·&nbsp; Stand on a flat surface &nbsp;·&nbsp;
+        Arms slightly away from body
+        </div>""", unsafe_allow_html=True)
+
+        col_f, col_s = st.columns(2)
+        with col_f:
+            st.markdown('<p class="ba-photo-label">📷 Front View</p>', unsafe_allow_html=True)
+            ba_front = st.file_uploader("Front photo", type=["jpg","jpeg","png","webp"],
+                                        key="ba_front", label_visibility="collapsed")
+            if ba_front:
+                st.image(ba_front, use_column_width=True)
+        with col_s:
+            st.markdown('<p class="ba-photo-label">📷 Side View (optional but recommended)</p>',
+                        unsafe_allow_html=True)
+            ba_side = st.file_uploader("Side photo", type=["jpg","jpeg","png","webp"],
+                                       key="ba_side", label_visibility="collapsed")
+            if ba_side:
+                st.image(ba_side, use_column_width=True)
 
     st.markdown('<div class="ba-disclaimer">⚠️ <strong>Estimates only.</strong> '
                 'Body fat and muscle mass are calculated from anthropometric formulas — not medical-grade measurements. '
@@ -3063,19 +3573,30 @@ No bullet points — write in flowing paragraphs. Keep it under 300 words."""
 
     st.markdown('</div>', unsafe_allow_html=True)  # close ba-zone
 
-    # ── Analyse button ────────────────────────────────────────────
+    # ── Analyse button — works for both modes ─────────────────────
+    # Normalise: convert base64 string → bytes-like for load_img
+    def ba_to_bytes(src):
+        """Accept file-uploader object OR base64 string, return bytes."""
+        if src is None: return None
+        if hasattr(src, 'read'):
+            src.seek(0)
+            return src.read()
+        import base64
+        b64 = src.split(',')[1] if ',' in src else src
+        return base64.b64decode(b64)
+
     if ba_front is not None:
         if st.button("🔬 Analyse My Body", type="primary", key="ba_run",
                      use_container_width=True):
 
             with st.spinner("Detecting landmarks and computing metrics…"):
 
-                # Load images
-                def load_img(uploaded):
-                    arr = np.frombuffer(uploaded.read(), np.uint8)
-                    uploaded.seek(0)
-                    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                    return img
+                # Load images — works for file-uploader objects AND base64 strings
+                def load_img(src):
+                    raw = ba_to_bytes(src)
+                    if raw is None: return None
+                    arr = np.frombuffer(raw, np.uint8)
+                    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
                 img_front = load_img(ba_front)
                 img_side  = load_img(ba_side) if ba_side else None
