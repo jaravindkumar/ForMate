@@ -3245,258 +3245,172 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none
   </div>
 </div>
 
-<!-- TF.js + MoveNet (same CDN as Live Trainer) -->
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.2.0/dist/tf-core.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.2.0/dist/tf-converter.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.2.0/dist/tf-backend-webgl.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.0/dist/pose-detection.min.js"></script>
+<!-- TF.js + MoveNet — exact same versions as Live Trainer -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
 <script>
-const HOLD_SECS  = 5;
-const CIRC       = 226;  // 2*pi*36
+const HOLD_SECS=5, CIRC=226;
+let phase='front',detector=null,stream=null,rafId=null;
+let holdStart=null,holdActive=false,imgFront=null,imgSide=null;
+const MV={NOSE:0,L_SH:5,R_SH:6,L_EL:7,R_EL:8,L_WR:9,R_WR:10,
+          L_HIP:11,R_HIP:12,L_KN:13,R_KN:14,L_AN:15,R_AN:16};
+const CONNS=[[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],
+             [11,13],[13,15],[12,14],[14,16]];
 
-let phase      = 'front';
-let detector   = null;
-let stream     = null;
-let rafId      = null;
-let holdStart  = null;
-let holdActive = false;
-let imgFront   = null;
-let imgSide    = null;
-let lastPoses  = [];
-
-const video    = document.getElementById('video');
-const canvas   = document.getElementById('canvas');
-const ctx      = canvas.getContext('2d');
-const ringArc  = document.getElementById('ring-arc');
-const ringNum  = document.getElementById('ring-num');
-const ringWrap = document.getElementById('ring-wrap');
-
-// ── Camera + model boot ─────────────────────────────────────────
 async function startCapture(){
-  const btn = document.getElementById('btn-start');
-  const err = document.getElementById('err-msg');
-  btn.textContent = 'Loading…'; btn.disabled = true;
-  err.style.display = 'none';
-
-  try {
-    // Camera first — same pattern as Live Trainer
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: { ideal: 'user' } }
-    }).catch(() =>
-      navigator.mediaDevices.getUserMedia({ audio: false, video: true })
-    );
-
-    video.srcObject = stream;
-    await new Promise(r => { video.onloadedmetadata = r; });
-    await video.play();
-    applyOrientation();
-    resizeCanvas();
-
-    // Hide off-screen, show UI
-    document.getElementById('cam-off').style.display   = 'none';
+  const btn=document.getElementById('btn-start');
+  const err=document.getElementById('err-msg');
+  btn.textContent='Loading…';btn.disabled=true;err.style.display='none';
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'user'}}})
+      .catch(()=>navigator.mediaDevices.getUserMedia({audio:false,video:true}));
+    const video=document.getElementById('video');
+    video.srcObject=stream;
+    await new Promise(r=>video.onloadedmetadata=r);
+    video.play();
+    applyVideoOrientation(video);
+    document.getElementById('cam-off').style.display='none';
     document.getElementById('status-bar').classList.add('visible');
     document.getElementById('gesture-box').classList.add('visible');
-
-    // Load MoveNet
-    detector = await poseDetection.createDetector(
+    detector=await poseDetection.createDetector(
       poseDetection.SupportedModels.MoveNet,
-      { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-        enableSmoothing: true }
+      {modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,enableSmoothing:true}
     );
-
-    loop();
-  } catch(e) {
-    btn.textContent = 'Start Camera'; btn.disabled = false;
-    err.textContent = 'Camera error: ' + (e.message || e);
-    err.style.display = 'block';
+    detect();
+  }catch(e){
+    btn.textContent='Start Camera';btn.disabled=false;
+    err.textContent='Camera error: '+(e.message||e);err.style.display='block';
   }
 }
 
-function applyOrientation(){
-  const vW = video.videoWidth, vH = video.videoHeight;
-  const needsRotate = vW > vH;
-  const container = document.getElementById('cam-container');
-  const cW = container.offsetWidth, cH = container.offsetHeight;
+function applyVideoOrientation(video){
+  const vW=video.videoWidth,vH=video.videoHeight,needsRotate=vW>vH;
+  const c=document.getElementById('cam-container');
+  const cW=c.offsetWidth,cH=c.offsetHeight;
   if(needsRotate){
-    video.style.position = 'absolute';
-    video.style.width    = cH + 'px';
-    video.style.height   = cW + 'px';
-    video.style.top      = '50%'; video.style.left = '50%';
-    video.style.objectFit = 'cover';
-    video.className = 'portrait-fix mirror';
-  } else {
-    video.style.position = 'absolute';
-    video.style.width = '100%'; video.style.height = '100%';
-    video.style.top = '0'; video.style.left = '0';
-    video.style.objectFit = 'cover';
-    video.className = 'normal mirror';
+    video.style.cssText='position:absolute;top:50%;left:50%;object-fit:cover;';
+    video.style.width=cH+'px';video.style.height=cW+'px';
+    video.className='portrait-fix mirror';
+  }else{
+    video.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;';
+    video.className='normal mirror';
   }
 }
 
-function resizeCanvas(){
-  const c = document.getElementById('cam-container');
-  canvas.width  = c.offsetWidth;
-  canvas.height = c.offsetHeight;
-}
-
-// ── Skeleton ────────────────────────────────────────────────────
-const BONES = [
-  [5,6],[5,7],[7,9],[6,8],[8,10],
-  [5,11],[6,12],[11,12],
-  [11,13],[13,15],[12,14],[14,16]
-];
-const LEG_BONES = [[11,13],[13,15],[12,14],[14,16],[11,12]];
-const LEG_SET   = new Set([11,12,13,14,15,16]);
-
-function drawSkeleton(poses){
-  if(!poses || !poses.length) return;
-  const kps = poses[0].keypoints;
-  const W = canvas.width, H = canvas.height;
-  ctx.save();
-  // Mirror canvas to match mirrored video
-  ctx.scale(-1,1); ctx.translate(-W,0);
-
-  for(const [a,b] of BONES){
-    const ka=kps[a], kb=kps[b];
-    if(!ka||!kb||ka.score<0.25||kb.score<0.25) continue;
-    const isLeg = LEG_SET.has(a)||LEG_SET.has(b);
-    ctx.beginPath();
-    ctx.moveTo(ka.x/video.videoWidth*W, ka.y/video.videoHeight*H);
-    ctx.lineTo(kb.x/video.videoWidth*W, kb.y/video.videoHeight*H);
-    ctx.strokeStyle = isLeg?'rgba(59,130,246,.95)':'rgba(220,230,240,.75)';
-    ctx.lineWidth   = isLeg?3.5:2;
-    ctx.shadowColor = '#3B82F6'; ctx.shadowBlur = isLeg?10:0;
-    ctx.stroke();
+function drawSkel(ctx,kp,vW,vH,rW,rH,offX,offY){
+  const px=i=>kp[i]?offX+(rW-kp[i].x/vW*rW):0;
+  const py=i=>kp[i]?offY+kp[i].y/vH*rH:0;
+  const vs=i=>kp[i]?kp[i].score:0;
+  ctx.lineWidth=4;ctx.lineCap='round';
+  for(const[a,b]of CONNS){
+    if(vs(a)<0.25||vs(b)<0.25)continue;
+    ctx.globalAlpha=0.9;ctx.strokeStyle='#3B82F6';
+    ctx.shadowColor='#3B82F6';ctx.shadowBlur=8;
+    ctx.beginPath();ctx.moveTo(px(a),py(a));ctx.lineTo(px(b),py(b));ctx.stroke();
   }
+  ctx.globalAlpha=1;ctx.shadowBlur=0;
   for(let i=5;i<=16;i++){
-    const k=kps[i]; if(!k||k.score<0.25) continue;
-    ctx.beginPath();
-    ctx.arc(k.x/video.videoWidth*W, k.y/video.videoHeight*H, LEG_SET.has(i)?5:3.5, 0, Math.PI*2);
-    ctx.fillStyle = LEG_SET.has(i)?'#60A5FA':'rgba(255,255,255,.9)';
-    ctx.shadowBlur=6; ctx.shadowColor='#3B82F6';
-    ctx.fill();
+    if(vs(i)<0.25)continue;
+    ctx.beginPath();ctx.arc(px(i),py(i),5,0,Math.PI*2);
+    ctx.fillStyle='#60A5FA';ctx.fill();
   }
-  ctx.restore();
 }
 
-// ── Gesture detection — one wrist above nose ─────────────────────
-function detectRaisedHand(poses){
-  if(!poses||!poses.length) return false;
-  const kps  = poses[0].keypoints;
-  const nose = kps[0];
-  const lw   = kps[9];   // left wrist
-  const rw   = kps[10];  // right wrist
-  if(!nose||nose.score<0.3) return false;
-
-  // Convert to normalised coords (0–1) for threshold
-  const noseY  = nose.y / video.videoHeight;
-  const lwY    = lw  && lw.score>0.25  ? lw.y/video.videoHeight  : 1;
-  const rwY    = rw  && rw.score>0.25  ? rw.y/video.videoHeight  : 1;
-
-  return (lwY < noseY - 0.05) || (rwY < noseY - 0.05);
+function isHandRaised(kp,vH){
+  const nose=kp[0],lw=kp[9],rw=kp[10];
+  if(!nose||nose.score<0.3)return false;
+  const nY=nose.y/vH;
+  const lY=lw&&lw.score>0.25?lw.y/vH:1;
+  const rY=rw&&rw.score>0.25?rw.y/vH:1;
+  return lY<nY-0.08||rY<nY-0.08;
 }
 
-// ── Ring ────────────────────────────────────────────────────────
 function setRing(pct){
-  ringArc.style.strokeDashoffset = CIRC * (1 - pct);
-  if(pct <= 0){
-    ringArc.style.stroke = 'rgba(255,255,255,.12)';
-    ringWrap.className = '';
-    ringNum.textContent = '✋';
-  } else if(pct >= 1){
-    ringArc.style.stroke = '#34D399';
-    ringWrap.className = 'done';
-    ringNum.textContent = '✓';
-  } else {
-    ringArc.style.stroke = '#3B82F6';
-    ringWrap.className = 'counting';
-    ringNum.textContent = Math.ceil(HOLD_SECS*(1-pct));
-  }
+  const arc=document.getElementById('ring-arc');
+  const num=document.getElementById('ring-num');
+  const wrap=document.getElementById('ring-wrap');
+  arc.style.strokeDashoffset=CIRC*(1-pct);
+  if(pct<=0){arc.style.stroke='rgba(255,255,255,.15)';wrap.className='';num.textContent='✋';}
+  else if(pct>=1){arc.style.stroke='#34D399';wrap.className='done';num.textContent='✓';}
+  else{arc.style.stroke='#3B82F6';wrap.className='counting';num.textContent=Math.ceil(HOLD_SECS*(1-pct));}
 }
 
-// ── Capture frame ───────────────────────────────────────────────
 function captureFrame(){
-  const fl = document.getElementById('flash');
-  fl.style.opacity='1'; setTimeout(()=>{fl.style.opacity='0';},110);
-
-  const cap = document.createElement('canvas');
-  cap.width  = video.videoWidth;
-  cap.height = video.videoHeight;
-  const c2   = cap.getContext('2d');
-  // Mirror to match display
-  c2.save(); c2.scale(-1,1); c2.translate(-cap.width,0);
-  c2.drawImage(video,0,0);
-  c2.restore();
-  return cap.toDataURL('image/jpeg', 0.92);
+  const video=document.getElementById('video');
+  const fl=document.getElementById('flash');
+  fl.style.opacity='1';setTimeout(()=>fl.style.opacity='0',100);
+  const cap=document.createElement('canvas');
+  cap.width=video.videoWidth;cap.height=video.videoHeight;
+  const c2=cap.getContext('2d');
+  c2.save();c2.scale(-1,1);c2.translate(-cap.width,0);
+  c2.drawImage(video,0,0);c2.restore();
+  return cap.toDataURL('image/jpeg',0.92);
 }
 
-// ── Phase: front → side → done ─────────────────────────────────
 function goSide(){
-  phase = 'side';
-  holdStart = null; holdActive = false; setRing(0);
-
-  document.getElementById('phase-name').textContent  = 'Side View';
-  document.getElementById('gesture-hint').textContent = 'Side photo · Shot 2 of 2';
-  document.getElementById('dot0').className = 'dot done';
-  document.getElementById('dot1').className = 'dot active';
-
-  // Turn message
-  const msg = document.getElementById('turn-msg');
-  msg.classList.add('visible');
-  setTimeout(()=>msg.classList.remove('visible'), 2400);
+  phase='side';holdStart=null;holdActive=false;setRing(0);
+  document.getElementById('phase-name').textContent='Side View';
+  document.getElementById('gesture-hint').textContent='Side photo · Shot 2 of 2';
+  document.getElementById('dot0').className='dot done';
+  document.getElementById('dot1').className='dot active';
+  const msg=document.getElementById('turn-msg');
+  msg.classList.add('visible');setTimeout(()=>msg.classList.remove('visible'),2500);
 }
 
 function goDone(){
-  phase = 'done';
-  cancelAnimationFrame(rafId);
-
-  document.getElementById('dot1').className = 'dot done';
+  phase='done';cancelAnimationFrame(rafId);
   document.getElementById('gesture-box').classList.remove('visible');
   document.getElementById('status-bar').classList.remove('visible');
-
-  document.getElementById('thumb-front').src = imgFront;
-  document.getElementById('thumb-side').src  = imgSide;
+  document.getElementById('thumb-front').src=imgFront;
+  document.getElementById('thumb-side').src=imgSide;
   document.getElementById('done-overlay').classList.add('visible');
-
-  // Send to Streamlit parent
-  setTimeout(()=>{
-    window.parent.postMessage({ type:'ba_photos', front:imgFront, side:imgSide }, '*');
-  }, 500);
+  setTimeout(()=>window.parent.postMessage({type:'ba_photos',front:imgFront,side:imgSide},'*'),500);
 }
 
-// ── Main loop ───────────────────────────────────────────────────
-async function loop(){
-  if(phase==='done') return;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  if(detector && video.readyState>=2){
-    try{
-      lastPoses = await detector.estimatePoses(video,{flipHorizontal:false});
-    }catch(e){}
-  }
-
-  drawSkeleton(lastPoses);
-
-  const raised = detectRaisedHand(lastPoses);
-
-  if(raised){
-    if(!holdActive){ holdActive=true; holdStart=performance.now(); }
-    const pct = Math.min((performance.now()-holdStart)/1000/HOLD_SECS, 1);
-    setRing(pct);
-    if(pct>=1){
-      const dataUrl = captureFrame();
-      if(phase==='front'){ imgFront=dataUrl; goSide(); }
-      else               { imgSide =dataUrl; goDone(); return; }
+async function detect(){
+  if(phase==='done')return;
+  const video=document.getElementById('video');
+  const canvas=document.getElementById('canvas');
+  const ctx=canvas.getContext('2d');
+  const _vW=video.videoWidth||640,_vH=video.videoHeight||480;
+  const rotated=video.className.includes('portrait-fix');
+  const vW=rotated?_vH:_vW,vH=rotated?_vW:_vH;
+  const cW=canvas.offsetWidth||canvas.width,cH=canvas.offsetHeight||canvas.height;
+  canvas.width=cW;canvas.height=cH;
+  const scale=Math.max(cW/vW,cH/vH);
+  const rW=vW*scale,rH=vH*scale,offX=(cW-rW)/2,offY=(cH-rH)/2;
+  ctx.clearRect(0,0,cW,cH);
+  try{
+    if(detector&&video.readyState>=2){
+      const poses=await detector.estimatePoses(video,{flipHorizontal:true});
+      if(poses.length>0){
+        const kp=poses[0].keypoints;
+        drawSkel(ctx,kp,vW,vH,rW,rH,offX,offY);
+        const raised=isHandRaised(kp,vH);
+        if(raised){
+          if(!holdActive){holdActive=true;holdStart=performance.now();}
+          const pct=Math.min((performance.now()-holdStart)/1000/HOLD_SECS,1);
+          setRing(pct);
+          if(pct>=1){
+            const url=captureFrame();
+            if(phase==='front'){imgFront=url;goSide();}
+            else{imgSide=url;goDone();return;}
+          }
+        }else{holdActive=false;holdStart=null;setRing(0);}
+      }else{
+        ctx.font='bold 14px Inter,sans-serif';ctx.fillStyle='rgba(255,255,255,.35)';
+        ctx.textAlign='center';
+        ctx.fillText('Point camera at your full body',cW/2,cH/2);
+      }
     }
-  } else {
-    holdActive=false; holdStart=null; setRing(0);
-  }
-
-  rafId = requestAnimationFrame(loop);
+  }catch(e){console.warn('detect:',e);}
+  rafId=requestAnimationFrame(detect);
 }
 
-window.addEventListener('resize', ()=>{ applyOrientation(); resizeCanvas(); });
+window.addEventListener('resize',()=>{
+  const v=document.getElementById('video');
+  if(v.srcObject)applyVideoOrientation(v);
+});
 </script>
 </body></html>"""
 
